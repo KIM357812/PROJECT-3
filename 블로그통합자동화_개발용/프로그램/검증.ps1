@@ -52,7 +52,8 @@ Assert (@(Get-Selection '1;2;' $candidates).Count -eq 2) '세미콜론 입력 �
 $results.Add('한 개·여러 개 소재 선택: 통과')
 
 $articleUrl = 'https://techcrunch.com/2026/09/30/example-one/'
-$html = '<div style="max-width: 800px; margin: 0 auto; padding: 20px; box-sizing: border-box;">'+"`n"+(('<img src="placeholder">'+"`n")*4)+'<p><a href="'+$articleUrl+'">중요한 원문 확인</a></p>'+"`n"+'<div style="background:#fff3e0"><p>다음 선택</p><p>이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?</p></div>'+"`n"+'<div data-blog-sources="true"><p><strong>출처</strong></p><p><a href="'+$articleUrl+'">TechCrunch</a></p></div>'+"`n"+'</div>'
+$testImage = '<img src="placeholder" alt="시험 이미지" title="시험 이미지" width="800" height="120" style="width: 100%; max-width: 400px; height: auto; display: block; margin: 0 auto; border-radius: 4px;" loading="lazy">'
+$html = '<div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family: ''Apple SD Gothic Neo'', ''Malgun Gothic'', sans-serif; color: #222; box-sizing: border-box; clear: both;">'+"`n"+(($testImage+"`n")*4)+'<p><a href="'+$articleUrl+'">중요한 원문 확인</a></p>'+"`n"+'<div style="background:#fff3e0"><p>다음 선택</p><p>이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?</p></div>'+"`n"+'<div data-blog-sources="true"><p><strong>출처</strong></p><p><a href="'+$articleUrl+'">TechCrunch</a></p></div>'+"`n"+'</div>'
 $metadata = @'
 ## 1. SEO 키워드 분석
 키워드
@@ -117,12 +118,19 @@ foreach ($name in @('본문.html','Blogger에_붙여넣을_본문.html','메타�
     Assert ([IO.File]::Exists((Join-Path $saved $name))) "결과 파일 $name"
 }
 Assert ([IO.File]::ReadAllText((Join-Path $saved '메타데이터.txt'),[Text.Encoding]::UTF8).StartsWith('## 1. SEO 키워드 분석')) '분리 저장'
-Assert ([IO.File]::ReadAllText((Join-Path $saved '본문.html'),[Text.Encoding]::UTF8) -eq [IO.File]::ReadAllText((Join-Path $saved 'Blogger에_붙여넣을_본문.html'),[Text.Encoding]::UTF8)) 'Blogger 붙여넣기용 본문 동일성'
+$bloggerHtml = [IO.File]::ReadAllText((Join-Path $saved 'Blogger에_붙여넣을_본문.html'),[Text.Encoding]::UTF8)
+Assert ($bloggerHtml -match '(?is)\A<div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family:') 'Blogger 본문 최대 800px·가운데 정렬·기존 디자인 유지'
+Assert ([regex]::Matches($bloggerHtml,'(?is)<img\b[^>]*max-width:\s*400px[^>]*>').Count -eq 4) 'Blogger 이미지 최대 400px·모바일 자동 조절'
+Assert ((Get-BloggerHostedImageCount $saved) -eq 0) '업로드 전에는 Blogger 실제 이미지 주소 없음'
+foreach ($name in @('본문.html','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','작업정보.json')) {
+    Assert (([IO.File]::GetAttributes((Join-Path $saved $name)) -band [IO.FileAttributes]::Hidden) -ne 0) "내부 파일 숨김 $name"
+}
+Assert (([IO.File]::GetAttributes((Join-Path $saved 'Blogger에_붙여넣을_본문.html')) -band [IO.FileAttributes]::Hidden) -eq 0) 'Blogger 게시용 본문 표시'
 foreach ($number in 1..4) {
     $single = [IO.File]::ReadAllText((Join-Path $saved ('Gemini_이미지_{0:D2}.txt' -f $number)),[Text.Encoding]::UTF8)
     Assert ([regex]::Matches($single,'(?m)^###\s*[1-4]\.').Count -eq 1) "Gemini 이미지 $number 개별 분리"
 }
-$results.Add('글별 폴더·결과 파일 저장: 통과')
+$results.Add('Blogger 게시용 본문 표시·800px 본문·400px 이미지: 통과')
 
 $testFolder = $saved
 Assert ([IO.File]::ReadAllText((Join-Path $testFolder '본문.html'),[Text.Encoding]::UTF8).Contains('placeholder')) 'UTF-8 저장'
@@ -159,6 +167,7 @@ Assert (($outputs | ForEach-Object Name) -join ',' -eq '01.webp,02.webp,03.webp,
 $after = @(Get-ChildItem -LiteralPath (Join-Path $testFolder '원본이미지') -File | Sort-Object Name | Get-FileHash -Algorithm SHA256 | ForEach-Object Hash)
 Assert (($before -join ',') -eq ($after -join ',')) '원본 보존'
 Assert ([IO.File]::Exists((Join-Path $testFolder '미리보기.html'))) '로컬 미리보기 생성'
+Assert (([IO.File]::GetAttributes((Join-Path $testFolder '미리보기.html')) -band [IO.FileAttributes]::Hidden) -ne 0) '미리보기 내부 파일 숨김'
 $preview=[IO.File]::ReadAllText((Join-Path $testFolder '미리보기.html'),[Text.Encoding]::UTF8)
 foreach($number in 1..4){Assert ($preview -match ('압축이미지/{0:D2}\.webp' -f $number)) "미리보기 이미지 $number 연결"}
 Assert ([IO.Directory]::Exists((Join-Path (Get-ArticleBackupPath $testFolder) '원본이미지'))) '원본 이미지 백업'

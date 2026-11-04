@@ -105,7 +105,8 @@ function Show-ImageStatus {
         $count=@(Get-ChildItem -LiteralPath $source -File|Where-Object Extension -Match '^\.(jpg|jpeg|png|webp)$').Count
         $done=@(Get-ChildItem -LiteralPath $target -File -Filter '*.webp').Count
         $difference=if($count -lt 4){'부족 '+(4-$count)+'장'}elseif($count -gt 4){'초과 '+($count-4)+'장'}else{'4장 확인'}
-        Write-Host ("{0}: 원본 {1}장 ({2}), WebP {3}장" -f $folder.Name,$count,$difference,$done)
+        $bloggerImages=Get-BloggerHostedImageCount $folder.FullName
+        Write-Host ("{0}: 원본 {1}장 ({2}), WebP {3}장, Blogger 실제 이미지 {4}/4" -f $folder.Name,$count,$difference,$done,$bloggerImages)
     }
 }
 

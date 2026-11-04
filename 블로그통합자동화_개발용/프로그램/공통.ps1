@@ -204,12 +204,23 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
     $expectedComparableUrl = Get-ComparableUrl $expectedSourceUrl
     if (-not $expectedComparableUrl) { throw '선택한 소재의 실제 기사 URL이 없습니다.' }
     if (-not $html.EndsWith('</div>')) { throw '본문 HTML이 바깥쪽 div로 끝나지 않습니다.' }
-    if ([regex]::Matches($html,'(?i)<img\b').Count -ne 4) { throw '본문 이미지 placeholder가 4개가 아닙니다.' }
+    $imageTags = @([regex]::Matches($html,'(?is)<img\b[^>]*>'))
+    if ($imageTags.Count -ne 4) { throw '본문 이미지 placeholder가 4개가 아닙니다.' }
+    foreach ($imageTag in $imageTags) {
+        $tag = $imageTag.Value
+        $style = [regex]::Match($tag,'(?is)\bstyle\s*=\s*["''](?<value>[^"'']+)["'']').Groups['value'].Value
+        $alt = [regex]::Match($tag,'(?is)\balt\s*=\s*["''](?<value>[^"'']+)["'']').Groups['value'].Value
+        $title = [regex]::Match($tag,'(?is)\btitle\s*=\s*["''](?<value>[^"'']+)["'']').Groups['value'].Value
+        if ($style -notmatch '(?i)width\s*:\s*100%' -or $style -notmatch '(?i)max-width\s*:\s*400px' -or $style -notmatch '(?i)height\s*:\s*auto' -or $style -notmatch '(?i)display\s*:\s*block' -or $style -notmatch '(?i)margin\s*:\s*0(?:px)?\s+auto') {
+            throw '본문 이미지는 최대 400px·가운데 정렬·모바일 자동 축소 스타일을 지켜야 합니다.'
+        }
+        if (-not $alt -or $alt -ne $title) { throw '본문 이미지의 alt와 title에는 같은 장면 설명이 있어야 합니다.' }
+    }
     $outer = [regex]::Match($html,'(?is)\A\s*<div\b(?<attrs>[^>]*)>')
     if (-not $outer.Success) { throw '본문 HTML의 바깥쪽 div를 찾을 수 없습니다.' }
     $outerAttrs = $outer.Groups['attrs'].Value
-    if ($outerAttrs -notmatch '(?i)max-width\s*:\s*800px' -or $outerAttrs -notmatch '(?i)margin\s*:\s*0(?:px)?\s+auto') {
-        throw '본문 바깥쪽 div가 중앙 정렬·반응형 기준(max-width: 800px; margin: 0 auto)을 지키지 않았습니다.'
+    if ($outerAttrs -notmatch '(?i)width\s*:\s*100%' -or $outerAttrs -notmatch '(?i)max-width\s*:\s*800px' -or $outerAttrs -notmatch '(?i)margin\s*:\s*0(?:px)?\s+auto' -or $outerAttrs -notmatch '(?i)box-sizing\s*:\s*border-box' -or $outerAttrs -notmatch '(?i)clear\s*:\s*both') {
+        throw '본문 바깥쪽 div가 Blogger 중앙 정렬·반응형 기준(width: 100%; max-width: 800px; margin: 0 auto; clear: both)을 지키지 않았습니다.'
     }
     if ($html -match '(?im)^##\s+[1-5]\.' -or $html -match '(?is)글\s*설정\s*라벨.*게시\s*날짜.*퍼머링크.*검색\s*설명') {
         throw '본문 HTML에 메타데이터 또는 Blogger 설정 문구가 섞여 있습니다.'
@@ -288,6 +299,54 @@ function Invoke-Codex([string]$prompt, [string]$outputPath) {
     } finally { $process.Dispose() }
 }
 
+function Convert-ToBloggerHtml([string]$html) {
+    $result = [regex]::Replace($html,'(?is)\A\s*<div\b[^>]*>','<div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family: ''Apple SD Gothic Neo'', ''Malgun Gothic'', sans-serif; color: #222; box-sizing: border-box; clear: both;">',1)
+    $imageMatches = @([regex]::Matches($result,'(?is)<img\b[^>]*>'))
+    if ($imageMatches.Count -ne 4) { throw 'Blogger용 본문에는 이미지 위치가 정확히 4개 필요합니다.' }
+    for ($i=$imageMatches.Count-1; $i -ge 0; $i--) {
+        $tag = $imageMatches[$i].Value
+        $alt = [regex]::Match($tag,'(?is)\balt\s*=\s*["''](?<value>[^"'']+)["'']').Groups['value'].Value
+        if (-not $alt) { throw 'Blogger용 이미지에는 alt 설명이 필요합니다.' }
+        if ($tag -match '(?is)\btitle\s*=') {
+            $tag = [regex]::Replace($tag,'(?is)(\btitle\s*=\s*)["''][^"'']*["'']',('$1"'+$alt+'"'),1)
+        } else { $tag = $tag.Insert($tag.Length-1,(' title="'+$alt+'"')) }
+        $style = 'width: 100%; max-width: 400px; height: auto; display: block; margin: 0 auto; border-radius: 4px;'
+        if ($tag -match '(?is)\bstyle\s*=') {
+            $tag = [regex]::Replace($tag,'(?is)(\bstyle\s*=\s*)["''][^"'']*["'']',('$1"'+$style+'"'),1)
+        } else { $tag = $tag.Insert($tag.Length-1,(' style="'+$style+'"')) }
+        $result = $result.Remove($imageMatches[$i].Index,$imageMatches[$i].Length).Insert($imageMatches[$i].Index,$tag)
+    }
+    return $result.TrimEnd()+"`n"
+}
+
+function Get-BloggerHostedImageCount([string]$articleFolder) {
+    $path = Join-Path $articleFolder 'Blogger에_붙여넣을_본문.html'
+    if (-not [IO.File]::Exists($path)) { return 0 }
+    $html = [IO.File]::ReadAllText($path,[Text.Encoding]::UTF8)
+    return @([regex]::Matches($html,'(?is)<img\b[^>]*\bsrc\s*=\s*["'']https://blogger\.googleusercontent\.com/[^"'']+["'']')).Count
+}
+
+function Set-FileHiddenState([string]$path,[bool]$hidden) {
+    if (-not [IO.File]::Exists($path)) { return }
+    $attributes = [IO.File]::GetAttributes($path)
+    if ($hidden) { $attributes = $attributes -bor [IO.FileAttributes]::Hidden }
+    else { $attributes = $attributes -band (-bnot [IO.FileAttributes]::Hidden) }
+    [IO.File]::SetAttributes($path,$attributes)
+}
+
+function Hide-ArticleInternalFiles([string]$articleFolder) {
+    foreach ($name in @('본문.html','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','작업정보.json','미리보기.html','이미지_완료.txt')) {
+        $file = Join-Path $articleFolder $name
+        if ([IO.File]::Exists($file)) {
+            Set-FileHiddenState $file $true
+        }
+    }
+    $bloggerFile = Join-Path $articleFolder 'Blogger에_붙여넣을_본문.html'
+    if ([IO.File]::Exists($bloggerFile)) {
+        Set-FileHiddenState $bloggerFile $false
+    }
+}
+
 function Save-Article([object]$candidate, [object]$article) {
     # 잘못된 응답이면 결과 폴더를 만들기 전에 중단한다.
     $imageSections = @(Get-ImageSections $article.ImagePrompts)
@@ -302,7 +361,7 @@ function Save-Article([object]$candidate, [object]$article) {
     [IO.Directory]::CreateDirectory((Join-Path $path '원본이미지')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $path '압축이미지')) | Out-Null
     [IO.File]::WriteAllText((Join-Path $path '본문.html'),$article.Html,$script:Utf8)
-    [IO.File]::WriteAllText((Join-Path $path 'Blogger에_붙여넣을_본문.html'),$article.Html,$script:Utf8)
+    [IO.File]::WriteAllText((Join-Path $path 'Blogger에_붙여넣을_본문.html'),(Convert-ToBloggerHtml $article.Html),$script:Utf8)
     [IO.File]::WriteAllText((Join-Path $path '메타데이터.txt'),$article.Metadata,$script:Utf8)
     [IO.File]::WriteAllText((Join-Path $path '이미지_프롬프트.txt'),$article.ImagePrompts,$script:Utf8)
     $jobInfo = [ordered]@{
@@ -334,6 +393,7 @@ Gemini에서 네 장을 한꺼번에 요청하면 한 장의 콜라주로 합쳐
 '@
     [IO.File]::WriteAllText((Join-Path $path '이미지_생성용_전체프롬프트.txt'),$geminiGuide.Trim()+"`n",$script:Utf8)
     Backup-ArticleText $path | Out-Null
+    Hide-ArticleInternalFiles $path
     return $path
 }
 
@@ -459,6 +519,7 @@ function Process-Images([string]$articleFolder) {
     New-LocalPreview $articleFolder | Out-Null
     $jobInfoPath = Join-Path $articleFolder '작업정보.json'
     if ([IO.File]::Exists($jobInfoPath)) {
+        Set-FileHiddenState $jobInfoPath $false
         $jobInfo = [IO.File]::ReadAllText($jobInfoPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
         $jobInfo.Status = '이미지 완료'
         $jobInfo | Add-Member -NotePropertyName ImageCompletedAt -NotePropertyValue ((Get-Date).ToString('o')) -Force
@@ -466,12 +527,13 @@ function Process-Images([string]$articleFolder) {
         $backupInfo = Join-Path (Get-ArticleBackupPath $articleFolder) '작업정보.json'
         Write-JsonAtomic $backupInfo $jobInfo 5
     }
+    Hide-ArticleInternalFiles $articleFolder
     return $targetDir
 }
 
 function New-LocalPreview([string]$articleFolder) {
-    $bodyPath = Join-Path $articleFolder '본문.html'
-    if (-not [IO.File]::Exists($bodyPath)) { throw "본문 파일을 찾지 못했습니다: $bodyPath" }
+    $bodyPath = Join-Path $articleFolder 'Blogger에_붙여넣을_본문.html'
+    if (-not [IO.File]::Exists($bodyPath)) { throw "Blogger 게시용 본문 파일을 찾지 못했습니다: $bodyPath" }
     $html = [IO.File]::ReadAllText($bodyPath,[Text.Encoding]::UTF8)
     $matches = @([regex]::Matches($html,'(?is)<img\b[^>]*\bsrc\s*=\s*["''][^"'']*["''][^>]*>'))
     if ($matches.Count -ne 4) { throw '로컬 미리보기에는 이미지 위치가 정확히 4개 필요합니다.' }
@@ -488,6 +550,8 @@ function New-LocalPreview([string]$articleFolder) {
 </body></html>
 '@
     $path = Join-Path $articleFolder '미리보기.html'
+    Set-FileHiddenState $path $false
     [IO.File]::WriteAllText($path,$preview,$script:Utf8)
+    Hide-ArticleInternalFiles $articleFolder
     return $path
 }

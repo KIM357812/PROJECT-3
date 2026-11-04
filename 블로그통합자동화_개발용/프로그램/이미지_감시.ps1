@@ -18,6 +18,7 @@ try {
                 try {
                     $destination = Process-Images $article.FullName
                     [IO.File]::WriteAllText((Join-Path $article.FullName '이미지_완료.txt'),"WebP 4장 완료: $destination`n",$script:Utf8)
+                    Hide-ArticleInternalFiles $article.FullName
                 } catch { Write-ErrorLog ("이미지 변환 실패 [$($article.FullName)]: $($_.Exception.Message)") }
             }
         }
