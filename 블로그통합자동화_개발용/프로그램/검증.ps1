@@ -55,10 +55,11 @@ $articleUrl = 'https://techcrunch.com/2026/09/30/example-one/'
 $imageStyle = 'width: 100%; max-width: 400px; height: auto; display: block; margin: 0 auto; border-radius: 4px;'
 $firstImage = '<img src="placeholder" alt="첫 번째 시험 이미지" title="첫 번째 시험 이미지" width="800" height="120" style="'+$imageStyle+'" loading="eager" fetchpriority="high">'
 $lazyImage = '<img src="placeholder" alt="시험 이미지 NUMBER" title="시험 이미지 NUMBER" width="800" height="120" style="'+$imageStyle+'" loading="lazy">'
-$paragraphStyle = 'font-weight: 400; width: 100%; margin: 0 0 18px 0; line-height: 1.75; font-size: 16px; text-align: left; word-break: keep-all; overflow-wrap: anywhere; box-sizing: border-box;'
+$paragraphStyle = 'font-weight: 400; width: 100%; margin: 0 0 18px 0; line-height: 1.75; font-size: 16px; text-align: justify; text-align-last: left; word-break: keep-all; overflow-wrap: anywhere; box-sizing: border-box;'
 $filler = ('검증 가능한 기술 정보와 사업 조건을 독자가 추가 검색 없이 이해하도록 사실과 분석을 구분하여 설명합니다. ' * 6).Trim()
 $html = @'
 <div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; color: #222; box-sizing: border-box; clear: both;">
+<style>@media (max-width: 600px) { .solidb-responsive-table table, .solidb-responsive-table thead, .solidb-responsive-table tbody, .solidb-responsive-table tr, .solidb-responsive-table th, .solidb-responsive-table td { display: block; width: 100% !important; } .solidb-responsive-table thead { position: absolute; width: 1px !important; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } .solidb-responsive-table tr { margin: 0 0 12px 0; border: 1px solid #ddd; border-radius: 4px; } .solidb-responsive-table td { display: grid !important; grid-template-columns: minmax(105px, 40%) 1fr; gap: 10px; padding: 10px 12px !important; text-align: left !important; box-sizing: border-box; } .solidb-responsive-table td::before { content: attr(data-label); font-weight: 700; color: #333; } }</style>
 FIRST_IMAGE
 <p style="PARAGRAPH_STYLE">FILLER <a href="ARTICLE_URL">중요한 원문 확인</a></p>
 <h2>현황과 핵심 쟁점</h2>
@@ -66,7 +67,8 @@ LAZY_IMAGE_2
 <p style="PARAGRAPH_STYLE">FILLER</p>
 <h2>기술 원리와 도입 배경</h2>
 <p style="PARAGRAPH_STYLE">FILLER</p>
-<div style="font-weight: 400;"><strong>누가 (Who) : </strong>시험 기업<br><strong>무엇을 (What) : </strong>기술 검증<br><strong>언제 (When) : </strong>2026-09-30<br><strong>어디서 (Where) : </strong>시험 지역<br><strong>어떻게 (How) : </strong>검증 절차<br><strong>왜 (Why) : </strong>품질 향상</div>
+<div data-blog-six-facts="true" style="font-weight: 400; text-align: justify; text-align-last: left; word-break: keep-all; overflow-wrap: anywhere;"><strong>누가 (Who) : </strong>시험 기업<br><strong>무엇을 (What) : </strong>기술 검증<br><strong>언제 (When) : </strong>2026-09-30<br><strong>어디서 (Where) : </strong>시험 지역<br><strong>어떻게 (How) : </strong>검증 절차<br><strong>왜 (Why) : </strong>품질 향상</div>
+<div class="solidb-responsive-table"><table><thead><tr><th>항목</th><th>기간</th></tr></thead><tbody><tr><td data-label="항목">시험 기술</td><td data-label="기간">24개월</td></tr></tbody></table></div>
 <h2>시장 영향과 다음 단계</h2>
 LAZY_IMAGE_3
 <h3>사업화 조건</h3>
@@ -75,7 +77,7 @@ LAZY_IMAGE_4
 <h3>종합 판단</h3>
 <p style="PARAGRAPH_STYLE">FILLER</p>
 <div style="background:#fff3e0"><p>다음 선택</p><p>이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?</p></div>
-<div data-blog-sources="true"><p><strong>출처</strong></p><p><a href="ARTICLE_URL">TechCrunch</a></p></div>
+<div data-blog-sources="true" style="padding: 8px 12px; background-color: #f8f9fa;"><p style="margin: 0; font-size: 14px;"><strong>출처 :</strong> <a href="ARTICLE_URL">TechCrunch</a></p></div>
 </div>
 '@
 $html = $html.Replace('FIRST_IMAGE',$firstImage).Replace('LAZY_IMAGE_2',$lazyImage.Replace('NUMBER','2')).Replace('LAZY_IMAGE_3',$lazyImage.Replace('NUMBER','3')).Replace('LAZY_IMAGE_4',$lazyImage.Replace('NUMBER','4')).Replace('PARAGRAPH_STYLE',$paragraphStyle).Replace('FILLER',$filler).Replace('ARTICLE_URL',$articleUrl).Trim()
@@ -158,6 +160,17 @@ Assert (($article.ImageFiles -join ',') -eq '01-blogger-automation.webp,02-fact-
 Assert ($article.Html -match 'data-blog-sources="true"') '질문 아래 출처 영역'
 Assert ([regex]::Matches($article.Html,'https://techcrunch\.com/2026/09/30/example-one/').Count -eq 2) '본문 링크와 출처 URL 일치'
 try {
+    $longLink = $response.Replace('>중요한 원문 확인</a>','>한 문장 전체를 길게 연결한 중요한 원문 확인</a>')
+    Split-Article $longLink 'TechCrunch' $articleUrl | Out-Null
+    throw '15자 이상의 본문 링크 문구를 통과시켰습니다.'
+} catch { Assert ($_.Exception.Message -match '15자 미만') '본문 링크 문구 15자 미만 검사' }
+$results.Add('본문 양쪽 정렬·짧은 링크 문구 검증: 통과')
+$numberedMetadata = [regex]::Replace($metadata,'(?m)^### 검증 (\d+)\r?\n- 핵심 주장:','$1. 핵심 주장:')
+$numberedMetadata = [regex]::Replace($numberedMetadata,'(?m)^- (구분|확인 URL|확인일|검증 결과|정정 내용):','$1:')
+$numberedArticle = Split-Article ('```html'+"`n"+$html+"`n"+'```'+"`n`n"+$numberedMetadata) 'TechCrunch' $articleUrl
+Assert ($numberedArticle.FactCheck -match '(?m)^3\. 핵심 주장:') '사실검증 번호 목록 형식 허용'
+$results.Add('사실검증 소제목·번호 목록 형식 호환: 통과')
+try {
     $shortQuestion=$response.Replace('이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?','짧은 질문인가요?')
     Split-Article $shortQuestion 'TechCrunch' $articleUrl | Out-Null
     throw '내용이 부족한 짧은 질문을 통과시켰습니다.'
@@ -170,8 +183,8 @@ $multiSourceResponse = '```html'+"`n"+$multiSourceHtml+"`n"+'```'+"`n`n"+$metada
 $multiSourceArticle = Split-Article $multiSourceResponse 'TechCrunch' $articleUrl
 Assert ([regex]::Matches($multiSourceArticle.Html,'(?is)<a\b[^>]*href=').Count -eq 4) '선택 기사와 서로 다른 공식 보조 출처 허용'
 $relatedUrl = 'https://nexttechenergy.blogspot.com/2026/10/related-post.html'
-$relatedBlock = '<div data-blog-related="true"><p>관련 글</p><p><a href="'+$relatedUrl+'">기술 자동화의 이전 분석</a></p></div>'
-$sourceEnd = '<div data-blog-sources="true"><p><strong>출처</strong></p><p><a href="'+$articleUrl+'">TechCrunch</a></p></div>'
+$relatedBlock = '<div data-blog-related="true" style="background-color: #eef3fb;"><p style="font-size: 14px;">관련 글</p><p style="font-size: 14px;"><a href="'+$relatedUrl+'">기술 자동화의 이전 분석</a></p></div>'
+$sourceEnd = '<div data-blog-sources="true" style="padding: 8px 12px; background-color: #f8f9fa;"><p style="margin: 0; font-size: 14px;"><strong>출처 :</strong> <a href="'+$articleUrl+'">TechCrunch</a></p></div>'
 $relatedHtml = $html.Replace($sourceEnd+"`n</div>",$sourceEnd+"`n"+$relatedBlock+"`n</div>")
 $relatedResponse = '```html'+"`n"+$relatedHtml+"`n"+'```'+"`n`n"+$metadata
 $relatedArticle = Split-Article $relatedResponse 'TechCrunch' $articleUrl @($relatedUrl)
@@ -194,7 +207,7 @@ try {
     $vertical=$multiSourceResponse.Replace('</a>, <a href="'+$officialUrl+'">','</a></p><p><a href="'+$officialUrl+'">')
     Split-Article $vertical 'TechCrunch' $articleUrl | Out-Null
     throw '출처 세로 나열을 통과시켰습니다.'
-} catch { Assert ($_.Exception.Message -match '한 줄') '출처 한 줄·쉼표 구분 검사' }
+} catch { Assert ($_.Exception.Message -match '(?:한|같은) 줄') '출처 한 줄·쉼표 구분 검사' }
 try {
     $badResponse=$response.Replace('>TechCrunch</a>','>TechCrunch — Example One</a>')
     Split-Article $badResponse 'TechCrunch' $articleUrl | Out-Null
@@ -211,7 +224,8 @@ try {
 $baseLength=(Get-ArticleVisibleText $baseShortHtml).Length
 $targetLength=1150
 $padding='가' * [Math]::Max(1,($targetLength-$baseLength))
-$exceptionHtml=$baseShortHtml.Replace('중요한 원문 확인',($padding+' 중요한 원문 확인'))
+$shortAnchor='<a href="'+$articleUrl+'">중요한 원문 확인</a>'
+$exceptionHtml=$baseShortHtml.Replace($shortAnchor,($padding+' '+$shortAnchor))
 $exceptionMetadata=$metadata.Replace('짧은 글 예외 사유: 해당 없음','짧은 글 예외 사유: 원문 정보가 제한되어 반복 없이 핵심 기술과 사업 조건만 완결성 있게 설명함')
 $exceptionResponse='```html'+"`n"+$exceptionHtml+"`n"+'```'+"`n`n"+$exceptionMetadata
 $exceptionArticle=Split-Article $exceptionResponse 'TechCrunch' $articleUrl
@@ -229,15 +243,18 @@ try {
 $results.Add('글자 수 예외·대표 이미지 성능·제목 일치 자동 검증: 통과')
 
 $saved = Save-Article ([PSCustomObject]@{ Number=99; Title='검증용 한글 소재'; Site='TechCrunch'; Url=$articleUrl }) $article
-foreach ($name in @('본문.html','Blogger에_붙여넣을_본문.html','메타데이터.txt','사실검증표.md','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','Gemini_이미지_01.txt','Gemini_이미지_02.txt','Gemini_이미지_03.txt','Gemini_이미지_04.txt')) {
+foreach ($name in @('Blogger에_붙여넣을_본문.html','메타데이터.txt','사실검증표.md','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','Gemini_이미지_01.txt','Gemini_이미지_02.txt','Gemini_이미지_03.txt','Gemini_이미지_04.txt')) {
     Assert ([IO.File]::Exists((Join-Path $saved $name))) "결과 파일 $name"
 }
+$savedBackup = Get-ArticleBackupPath $saved
+Assert (-not [IO.File]::Exists((Join-Path $saved '본문.html'))) '사용자 글 폴더에서 내부 본문 제외'
+Assert ([IO.File]::Exists((Join-Path $savedBackup '본문.html'))) '복구 위치에 내부 본문 보관'
 Assert ([IO.File]::ReadAllText((Join-Path $saved '메타데이터.txt'),[Text.Encoding]::UTF8).StartsWith('## 1. SEO 키워드 분석')) '분리 저장'
 $bloggerHtml = [IO.File]::ReadAllText((Join-Path $saved 'Blogger에_붙여넣을_본문.html'),[Text.Encoding]::UTF8)
 Assert ($bloggerHtml -match '(?is)\A<div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family:') 'Blogger 본문 최대 800px·가운데 정렬·기존 디자인 유지'
 Assert ([regex]::Matches($bloggerHtml,'(?is)<img\b[^>]*max-width:\s*400px[^>]*>').Count -eq 4) 'Blogger 이미지 최대 400px·모바일 자동 조절'
 Assert ((Get-BloggerHostedImageCount $saved) -eq 0) '업로드 전에는 Blogger 실제 이미지 주소 없음'
-foreach ($name in @('본문.html','사실검증표.md','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','작업정보.json')) {
+foreach ($name in @('사실검증표.md','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','작업정보.json')) {
     Assert (([IO.File]::GetAttributes((Join-Path $saved $name)) -band [IO.FileAttributes]::Hidden) -ne 0) "내부 파일 숨김 $name"
 }
 Assert (([IO.File]::GetAttributes((Join-Path $saved 'Blogger에_붙여넣을_본문.html')) -band [IO.FileAttributes]::Hidden) -eq 0) 'Blogger 게시용 본문 표시'
@@ -248,7 +265,7 @@ foreach ($number in 1..4) {
 $results.Add('Blogger 게시용 본문 표시·800px 본문·400px 이미지: 통과')
 
 $testFolder = $saved
-Assert ([IO.File]::ReadAllText((Join-Path $testFolder '본문.html'),[Text.Encoding]::UTF8).Contains('placeholder')) 'UTF-8 저장'
+Assert ([IO.File]::ReadAllText((Join-Path $savedBackup '본문.html'),[Text.Encoding]::UTF8).Contains('placeholder')) 'UTF-8 내부 본문 저장'
 $results.Add('한글 파일명·UTF-8: 통과')
 
 try { Split-Article '형식 오류' 'TechCrunch' $articleUrl | Out-Null; throw '형식 오류를 통과시켰습니다.' } catch {

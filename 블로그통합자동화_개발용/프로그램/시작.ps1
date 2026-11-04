@@ -109,6 +109,17 @@ function Show-ImageStatus {
         $source=Join-Path $folder.FullName '원본이미지';$target=Join-Path $folder.FullName '압축이미지'
         $count=@(Get-ChildItem -LiteralPath $source -File|Where-Object Extension -Match '^\.(jpg|jpeg|png|webp)$').Count
         $done=@(Get-ChildItem -LiteralPath $target -File -Filter '*.webp').Count
+        if($count -eq 4 -and $done -eq 0){
+            try {
+                Write-Host ("{0}: 원본 4장을 확인했습니다. WebP 변환을 시작합니다." -f $folder.Name)
+                Process-Images $folder.FullName | Out-Null
+                $done=@(Get-ChildItem -LiteralPath $target -File -Filter '*.webp').Count
+                Write-Host ("{0}: WebP {1}장 자동 변환 완료" -f $folder.Name,$done) -ForegroundColor Green
+            } catch {
+                Write-ErrorLog ("이미지 수동 확인 변환 실패 [$($folder.FullName)]: $($_.Exception.Message)")
+                Write-Host ("{0}: 이미지 변환 실패 — {1}" -f $folder.Name,$_.Exception.Message) -ForegroundColor Red
+            }
+        }
         $difference=if($count -lt 4){'부족 '+(4-$count)+'장'}elseif($count -gt 4){'초과 '+($count-4)+'장'}else{'4장 확인'}
         $bloggerImages=Get-BloggerHostedImageCount $folder.FullName
         Write-Host ("{0}: 원본 {1}장 ({2}), WebP {3}장, Blogger 실제 이미지 {4}/4" -f $folder.Name,$count,$difference,$done,$bloggerImages)

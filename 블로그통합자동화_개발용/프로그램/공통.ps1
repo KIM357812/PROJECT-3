@@ -280,6 +280,22 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
     foreach ($label in @('누가\s*\(Who\)','무엇을\s*\(What\)','언제\s*\(When\)','어디서\s*\(Where\)','어떻게\s*\(How\)','왜\s*\(Why\)')) {
         if ($html -notmatch $label) { throw "육하원칙 박스 항목이 없습니다: $label" }
     }
+    $sixFactsOpen = [regex]::Match($html,'(?is)<div\b(?=[^>]*\bdata-blog-six-facts\s*=\s*["'']true["''])(?<attrs>[^>]*)>')
+    if (-not $sixFactsOpen.Success) { throw '육하원칙 내용 영역에 모바일 양쪽 정렬 표시가 없습니다.' }
+    $sixFactsAttrs = $sixFactsOpen.Groups['attrs'].Value
+    if ($sixFactsAttrs -notmatch '(?i)text-align\s*:\s*justify' -or $sixFactsAttrs -notmatch '(?i)text-align-last\s*:\s*left' -or $sixFactsAttrs -notmatch '(?i)overflow-wrap\s*:\s*anywhere') {
+        throw '육하원칙 내용은 양쪽 정렬, 마지막 줄 왼쪽 정렬과 긴 영문 줄바꿈 속성이 필요합니다.'
+    }
+
+    if ($html -match '(?is)<table\b') {
+        if ($html -notmatch '(?is)<div\b[^>]*class\s*=\s*["''][^"'']*\bsolidb-responsive-table\b[^"'']*["'']') { throw '데이터 표에는 모바일 세로형 변환 영역이 필요합니다.' }
+        if ($html -notmatch '(?is)@media\s*\(max-width\s*:\s*600px\)[\s\S]*?\.solidb-responsive-table\s+td::before[\s\S]*?attr\(data-label\)') { throw '데이터 표의 모바일 세로형 스타일이 없습니다.' }
+        $tableCells = @([regex]::Matches($html,'(?is)<td\b(?<attrs>[^>]*)>'))
+        if ($tableCells.Count -lt 1) { throw '데이터 표에 내용 셀이 없습니다.' }
+        foreach ($cell in $tableCells) {
+            if ($cell.Groups['attrs'].Value -notmatch '(?i)\bdata-label\s*=\s*["''][^"'']+["'']') { throw '모바일 표의 각 셀에는 해당 열 제목인 data-label이 필요합니다.' }
+        }
+    }
 
     $imageTags = @([regex]::Matches($html,'(?is)<img\b[^>]*>'))
     if ($imageTags.Count -ne 4) { throw '본문 이미지 placeholder가 4개가 아닙니다.' }
@@ -298,7 +314,7 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
     foreach ($paragraph in @([regex]::Matches($html,'(?is)<p\b(?<attrs>[^>]*)>'))) {
         $attrs = $paragraph.Groups['attrs'].Value
         if ($attrs -match '(?i)font-weight\s*:\s*400' -and $attrs -match '(?i)width\s*:\s*100%') {
-            if ($attrs -notmatch '(?i)text-align\s*:\s*left' -or $attrs -notmatch '(?i)overflow-wrap\s*:\s*anywhere') { throw '일반 본문은 모바일용 왼쪽 정렬과 긴 영문 줄바꿈 속성이 필요합니다.' }
+            if ($attrs -notmatch '(?i)text-align\s*:\s*justify' -or $attrs -notmatch '(?i)text-align-last\s*:\s*left' -or $attrs -notmatch '(?i)overflow-wrap\s*:\s*anywhere') { throw '일반 본문은 오른쪽 끝이 맞는 양쪽 정렬, 마지막 줄 왼쪽 정렬과 긴 영문 줄바꿈 속성이 필요합니다.' }
         }
     }
     if ([regex]::Matches($html,'(?is)<strong\b').Count -ne [regex]::Matches($html,'(?is)</strong>').Count -or $html -match '(?is)<strong\b[^>]*>[^<]*(?:<p\b|<div\b|<strong\b)' -or $html -match '(?is)<b\b|\*\*') { throw '굵은 글씨 태그가 문단 경계를 넘거나 허용되지 않은 굵게 표시가 있습니다.' }
@@ -314,11 +330,16 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
     if ($questionText.Length -lt 45 -or $questionText.Length -gt 90 -or ([regex]::Matches($questionText,'\?').Count -ne 1) -or -not $questionText.EndsWith('?')) { throw '질문은 전체 내용을 반영한 45~90자의 한 문장이어야 하며 물음표는 끝에 하나만 있어야 합니다.' }
 
     $sourceBlock = $ending.Groups['source'].Value
-    if ($sourceBlock -notmatch '(?is)<(?:p|h[2-6])\b[^>]*>\s*(?:<strong>\s*)?출처(?:\s*</strong>)?\s*</(?:p|h[2-6])>') { throw '출처 영역의 제목은 출처여야 합니다.' }
+    $sourceOpen = [regex]::Match($html,'(?is)<div\b(?=[^>]*\bdata-blog-sources\s*=\s*["'']true["''])(?<attrs>[^>]*)>')
+    $sourceAttrs = $sourceOpen.Groups['attrs'].Value
+    if ($sourceAttrs -notmatch '(?i)background(?:-color)?\s*:\s*#f8f9fa') { throw '출처 영역은 핵심 요약 상자와 같은 회색 배경이어야 합니다.' }
+    if ($sourceAttrs -match '(?i)border-left\s*:') { throw '출처 영역에는 왼쪽 세로선을 표시하지 않습니다.' }
+    if ($sourceAttrs -notmatch '(?i)padding\s*:\s*8px\s+12px') { throw '출처 영역은 한 줄 높이에 맞는 8px 12px 여백이어야 합니다.' }
     $sourceAnchors = @([regex]::Matches($sourceBlock,'(?is)<a\b[^>]*\bhref\s*=\s*["''](?<url>https?://[^"'']+)["''][^>]*>(?<text>[\s\S]*?)</a>'))
     if ($sourceAnchors.Count -lt 1 -or $sourceAnchors.Count -gt 3) { throw '출처 영역의 클릭 가능한 원문 링크는 1~3개여야 합니다.' }
-    $sourceLine = [regex]::Match($sourceBlock,'(?is)<p\b[^>]*>\s*<a\b[^>]*>[\s\S]*?</a>(?:\s*,\s*<a\b[^>]*>[\s\S]*?</a>){0,2}\s*</p>')
-    if (-not $sourceLine.Success -or [regex]::Matches($sourceLine.Value,'(?is)<a\b').Count -ne $sourceAnchors.Count) { throw '출처 링크는 한 줄에 표시하고 쉼표와 공백으로 구분해야 합니다.' }
+    $sourceLine = [regex]::Match($sourceBlock,'(?is)<p\b(?<attrs>[^>]*)>\s*<strong\b[^>]*>\s*출처\s*:\s*</strong>\s*<a\b[^>]*>[\s\S]*?</a>(?:\s*,\s*<a\b[^>]*>[\s\S]*?</a>){0,2}\s*</p>')
+    if (-not $sourceLine.Success -or [regex]::Matches($sourceLine.Value,'(?is)<a\b').Count -ne $sourceAnchors.Count) { throw '출처는 제목과 링크를 같은 줄에 두고 쉼표와 공백으로 구분해야 합니다.' }
+    if ($sourceLine.Groups['attrs'].Value -notmatch '(?i)font-size\s*:\s*14px') { throw '출처 제목과 링크 글자는 14px여야 합니다.' }
     $sourceUrls = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $selectedFound = $false
     foreach ($anchor in $sourceAnchors) {
@@ -332,17 +353,26 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
         }
     }
     if (-not $selectedFound) { throw '출처 영역에 사용자가 선택한 실제 기사 URL이 없습니다.' }
-    foreach ($anchor in @([regex]::Matches($beforeSource,'(?is)<a\b[^>]*\bhref\s*=\s*["''](?<url>https?://[^"'']+)["'']'))) {
+    foreach ($anchor in @([regex]::Matches($beforeSource,'(?is)<a\b[^>]*\bhref\s*=\s*["''](?<url>https?://[^"'']+)["''][^>]*>(?<text>[\s\S]*?)</a>'))) {
         $inlineUrl = Get-ComparableUrl ([Net.WebUtility]::HtmlDecode($anchor.Groups['url'].Value))
         if (-not $sourceUrls.Contains($inlineUrl)) { throw '본문 하이퍼링크 URL은 하단 출처 영역에도 반드시 표시해야 합니다.' }
+        $inlineText = Get-PlainText $anchor.Groups['text'].Value
+        if ([string]::IsNullOrWhiteSpace($inlineText) -or $inlineText.Length -ge 15) { throw '본문 하이퍼링크 문구는 공백을 포함해 15자 미만이어야 합니다.' }
     }
 
     $relatedUrls = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     if ($ending.Groups['related'].Success) {
         $relatedBlock = $ending.Groups['relatedContent'].Value
+        $relatedOpen = [regex]::Match($html,'(?is)<div\b(?=[^>]*\bdata-blog-related\s*=\s*["'']true["''])(?<attrs>[^>]*)>')
+        if ($relatedOpen.Groups['attrs'].Value -notmatch '(?i)background(?:-color)?\s*:\s*#eef3fb') { throw '관련 글 영역은 이 글에서 다루는 내용과 같은 파란색 배경이어야 합니다.' }
         if ($relatedBlock -notmatch '(?is)<p\b[^>]*>\s*(?:<strong>\s*)?관련 글(?:\s*</strong>)?\s*</p>') { throw '내부 링크 영역의 제목은 관련 글이어야 합니다.' }
+        $relatedTitle = [regex]::Match($relatedBlock,'(?is)<p\b(?<attrs>[^>]*)>\s*(?:<strong>\s*)?관련 글(?:\s*</strong>)?\s*</p>')
+        if ($relatedTitle.Groups['attrs'].Value -notmatch '(?i)font-size\s*:\s*14px') { throw '관련 글 제목은 이 글에서 다루는 내용과 같은 14px여야 합니다.' }
         $relatedAnchors = @([regex]::Matches($relatedBlock,'(?is)<a\b[^>]*\bhref\s*=\s*["''](?<url>https?://[^"'']+)["''][^>]*>(?<text>[\s\S]*?)</a>'))
         if ($relatedAnchors.Count -lt 1 -or $relatedAnchors.Count -gt 3) { throw '관련 기존 글 링크는 1~3개여야 합니다.' }
+        foreach ($relatedLine in @([regex]::Matches($relatedBlock,'(?is)<p\b(?<attrs>[^>]*)>\s*<a\b'))) {
+            if ($relatedLine.Groups['attrs'].Value -notmatch '(?i)font-size\s*:\s*14px') { throw '관련 글 링크 글자도 14px여야 합니다.' }
+        }
         $allowed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         foreach ($value in @($allowedRelatedUrls)) { $normalizedUrl=Get-ComparableUrl $value; if($normalizedUrl){[void]$allowed.Add($normalizedUrl)} }
         if ($allowed.Count -eq 0) { throw '기존 게시글 공개 목록이 없으므로 관련 글 영역을 만들 수 없습니다.' }
@@ -394,22 +424,26 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
     if (-not $shortReason) { throw '내부 사실검증표에 짧은 글 예외 사유가 없습니다.' }
     if ($visibleLength -lt 1300 -and ($shortReason -eq '해당 없음' -or $shortReason.Length -lt 10)) { throw '1,000~1,299자 예외 글에는 구체적인 짧은 글 사유가 필요합니다.' }
     if ($factCheck -notmatch '(?m)^기존 글 중복 점검\s*:\s*(?:중복 없음|후속 분석\s*—\s*.+)$') { throw '내부 사실검증표에 기존 글 중복 점검 결과가 없습니다.' }
-    $factItems = @([regex]::Matches($factCheck,'(?ms)^### 검증\s+\d+\s*$.*?(?=^### 검증\s+\d+\s*$|\z)'))
+    # Codex가 같은 사실검증 내용을 Markdown 소제목 또는 번호 목록으로
+    # 표현할 수 있으므로 두 형식을 모두 구조화된 검증 항목으로 인정한다.
+    $factItemPattern = '(?ms)^(?:###\s*검증\s+\d+\s*$|\d+\.\s*핵심 주장\s*:).*?(?=^(?:###\s*검증\s+\d+\s*$|\d+\.\s*핵심 주장\s*:)|\z)'
+    $factItems = @([regex]::Matches($factCheck,$factItemPattern))
     if ($factItems.Count -lt 3) { throw '내부 사실검증표에는 검증 항목이 3개 이상 필요합니다.' }
     $factUrls = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($item in $factItems) {
         foreach ($field in @('핵심 주장','구분','확인 URL','확인일','검증 결과','정정 내용')) {
-            if ($item.Value -notmatch ('(?m)^-[ \t]*'+[regex]::Escape($field)+'\s*:\s*\S')) { throw "사실검증 항목에 필드가 없습니다: $field" }
+            $fieldPattern = '(?m)^(?:\d+\.\s*)?-?[ \t]*'+[regex]::Escape($field)+'\s*:\s*\S'
+            if ($item.Value -notmatch $fieldPattern) { throw "사실검증 항목에 필드가 없습니다: $field" }
         }
-        $kind = [regex]::Match($item.Value,'(?m)^-[ \t]*구분\s*:\s*(?<value>[^\r\n]+)').Groups['value'].Value.Trim()
+        $kind = [regex]::Match($item.Value,'(?m)^(?:\d+\.\s*)?-?[ \t]*구분\s*:\s*(?<value>[^\r\n]+)').Groups['value'].Value.Trim()
         if ($kind -notin @('원문 사실','보완 자료','일반 기술 배경','작성자 분석')) { throw "사실검증 구분이 올바르지 않습니다: $kind" }
-        $urlText = [regex]::Match($item.Value,'(?m)^-[ \t]*확인 URL\s*:\s*(?<value>[^\r\n]+)').Groups['value'].Value.Trim()
+        $urlText = [regex]::Match($item.Value,'(?m)^(?:\d+\.\s*)?-?[ \t]*확인 URL\s*:\s*(?<value>[^\r\n]+)').Groups['value'].Value.Trim()
         if ($kind -ne '작성자 분석') {
             $url = Get-ComparableUrl $urlText
             if (-not $url) { throw '사실·수치·날짜 검증 항목에는 실제 확인 URL이 필요합니다.' }
             [void]$factUrls.Add($url)
         } elseif ($urlText -ne '해당 없음' -and -not (Get-ComparableUrl $urlText)) { throw '작성자 분석의 확인 URL은 해당 없음 또는 실제 URL이어야 합니다.' }
-        $checkedDate = [regex]::Match($item.Value,'(?m)^-[ \t]*확인일\s*:\s*(?<value>\d{4}-\d{2}-\d{2})\s*$').Groups['value'].Value
+        $checkedDate = [regex]::Match($item.Value,'(?m)^(?:\d+\.\s*)?-?[ \t]*확인일\s*:\s*(?<value>\d{4}-\d{2}-\d{2})\s*$').Groups['value'].Value
         if (-not $checkedDate) { throw '사실검증 확인일은 YYYY-MM-DD 형식이어야 합니다.' }
     }
     if (-not $factUrls.Contains($expectedComparableUrl)) { throw '내부 사실검증표에 선택한 원문 URL 검증 기록이 없습니다.' }
@@ -518,7 +552,10 @@ function Save-Article([object]$candidate, [object]$article) {
     [IO.Directory]::CreateDirectory($path) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $path '원본이미지')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $path '압축이미지')) | Out-Null
-    [IO.File]::WriteAllText((Join-Path $path '본문.html'),$article.Html,$script:Utf8)
+    # 내부 원고는 사용자용 글 폴더에 두지 않고 복구용 백업 위치에만 저장한다.
+    $internalBackup = Get-ArticleBackupPath $path
+    [IO.Directory]::CreateDirectory($internalBackup) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $internalBackup '본문.html'),$article.Html,$script:Utf8)
     [IO.File]::WriteAllText((Join-Path $path 'Blogger에_붙여넣을_본문.html'),(Convert-ToBloggerHtml $article.Html),$script:Utf8)
     [IO.File]::WriteAllText((Join-Path $path '메타데이터.txt'),$article.Metadata,$script:Utf8)
     [IO.File]::WriteAllText((Join-Path $path '사실검증표.md'),$article.FactCheck,$script:Utf8)
