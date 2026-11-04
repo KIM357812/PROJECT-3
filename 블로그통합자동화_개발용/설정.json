@@ -1,0 +1,9 @@
+{
+  "CodexModel": "gpt-5.6-sol",
+  "MaximumCandidates": 16,
+  "MaximumCandidatesPerSite": 2,
+  "ImageMaximumPixels": 1600,
+  "ImageWebpQuality": 0.86,
+  "BackupOriginalImages": true,
+  "KeepFailedTemporaryFiles": true
+}
