@@ -52,7 +52,7 @@ Assert (@(Get-Selection '1;2;' $candidates).Count -eq 2) '세미콜론 입력 �
 $results.Add('한 개·여러 개 소재 선택: 통과')
 
 $articleUrl = 'https://techcrunch.com/2026/09/30/example-one/'
-$html = '<div style="max-width: 800px; margin: 0 auto; padding: 20px; box-sizing: border-box;">'+"`n"+(('<img src="placeholder">'+"`n")*4)+'<p><a href="'+$articleUrl+'">중요한 원문 확인</a></p>'+"`n"+'<div style="background:#fff3e0"><p>독자 질문입니까?</p></div>'+"`n"+'<div data-blog-sources="true"><p><strong>출처</strong></p><p><a href="'+$articleUrl+'">TechCrunch — Example One</a></p></div>'+"`n"+'</div>'
+$html = '<div style="max-width: 800px; margin: 0 auto; padding: 20px; box-sizing: border-box;">'+"`n"+(('<img src="placeholder">'+"`n")*4)+'<p><a href="'+$articleUrl+'">중요한 원문 확인</a></p>'+"`n"+'<div style="background:#fff3e0"><p>다음 선택</p><p>이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?</p></div>'+"`n"+'<div data-blog-sources="true"><p><strong>출처</strong></p><p><a href="'+$articleUrl+'">TechCrunch</a></p></div>'+"`n"+'</div>'
 $metadata = @'
 ## 1. SEO 키워드 분석
 키워드
@@ -77,10 +77,15 @@ $article = Split-Article $response 'TechCrunch' $articleUrl
 Assert ($article.ImagePrompts -match '4\. 전망') '이미지 프롬프트 분리'
 Assert ($article.Html -match 'data-blog-sources="true"') '질문 아래 출처 영역'
 Assert ([regex]::Matches($article.Html,'https://techcrunch\.com/2026/09/30/example-one/').Count -eq 2) '본문 링크와 출처 URL 일치'
+try {
+    $shortQuestion=$response.Replace('이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?','짧은 질문인가요?')
+    Split-Article $shortQuestion 'TechCrunch' $articleUrl | Out-Null
+    throw '내용이 부족한 짧은 질문을 통과시켰습니다.'
+} catch { Assert ($_.Exception.Message -match '45~90자') '질문 길이·한 문장 형식 검사' }
 $officialUrl = 'https://www.iea.org/reports/energy-and-ai'
 $companyUrl = 'https://www.proenergyservices.com/news/example-announcement'
-$supportingSources = '<p><a href="'+$officialUrl+'">IEA — Energy and AI</a></p><p><a href="'+$companyUrl+'">PROENERGY — Example Announcement</a></p>'
-$multiSourceHtml = $html.Replace('</div>'+"`n"+'</div>',$supportingSources+'</div>'+"`n"+'</div>')
+$supportingSources = '>TechCrunch</a>, <a href="'+$officialUrl+'">International Energy Agency</a>, <a href="'+$companyUrl+'">PROENERGY</a></p>'
+$multiSourceHtml = $html.Replace('>TechCrunch</a></p>',$supportingSources)
 $multiSourceResponse = '```html'+"`n"+$multiSourceHtml+"`n"+'```'+"`n`n"+$metadata
 $multiSourceArticle = Split-Article $multiSourceResponse 'TechCrunch' $articleUrl
 Assert ([regex]::Matches($multiSourceArticle.Html,'(?is)<a\b[^>]*href=').Count -eq 4) '선택 기사와 서로 다른 공식 보조 출처 허용'
@@ -90,11 +95,21 @@ try {
     throw '출처에 없는 본문 URL을 통과시켰습니다.'
 } catch { Assert ($_.Exception.Message -match '하단 출처') '출처에 없는 본문 링크 차단' }
 try {
-    $extra='<p><a href="https://example.com/two">Example — Two</a></p><p><a href="https://example.com/three">Example — Three</a></p><p><a href="https://example.com/four">Example — Four</a></p>'
-    $badResponse=$response.Replace('</div>'+"`n"+'</div>',$extra+'</div>'+"`n"+'</div>')
+    $extra='>TechCrunch</a>, <a href="https://example.com/two">Example Two</a>, <a href="https://example.com/three">Example Three</a>, <a href="https://example.com/four">Example Four</a></p>'
+    $badResponse=$response.Replace('>TechCrunch</a></p>',$extra)
     Split-Article $badResponse 'TechCrunch' $articleUrl | Out-Null
     throw '출처 링크 4개를 통과시켰습니다.'
 } catch { Assert ($_.Exception.Message -match '1~3개') '출처 링크 최대 3개 제한' }
+try {
+    $vertical=$multiSourceResponse.Replace('</a>, <a href="'+$officialUrl+'">','</a></p><p><a href="'+$officialUrl+'">')
+    Split-Article $vertical 'TechCrunch' $articleUrl | Out-Null
+    throw '출처 세로 나열을 통과시켰습니다.'
+} catch { Assert ($_.Exception.Message -match '한 줄') '출처 한 줄·쉼표 구분 검사' }
+try {
+    $badResponse=$response.Replace('>TechCrunch</a>','>TechCrunch — Example One</a>')
+    Split-Article $badResponse 'TechCrunch' $articleUrl | Out-Null
+    throw '출처에 기사 제목 표시를 통과시켰습니다.'
+} catch { Assert ($_.Exception.Message -match '매체명·기관명만') '출처 화면에는 매체명·기관명만 허용' }
 $results.Add('HTML·메타데이터·이미지 프롬프트 분리: 통과')
 
 $saved = Save-Article ([PSCustomObject]@{ Number=99; Title='검증용 한글 소재'; Site='TechCrunch'; Url=$articleUrl }) $article

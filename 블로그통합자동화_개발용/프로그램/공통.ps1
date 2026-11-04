@@ -217,10 +217,17 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
     if ($html -match '(?is)<p\b[^>]*>\s*(?:<strong>\s*)?출처\s*사이트:') { throw '기존 형식인 출처 사이트 문단은 사용할 수 없습니다.' }
     $sourceMatches = [regex]::Matches($html,'(?is)<div\b(?=[^>]*\bdata-blog-sources\s*=\s*["'']true["''])[^>]*>(?<content>[\s\S]*?)</div>\s*</div>\s*\z')
     if ($sourceMatches.Count -ne 1) { throw '질문 상자 아래 본문 끝에 data-blog-sources="true"인 출처 영역이 정확히 하나 있어야 합니다.' }
+    $beforeSource = $html.Substring(0,$sourceMatches[0].Index)
+    $questionMatch = [regex]::Match($beforeSource,'(?is)<div\b(?=[^>]*background(?:-color)?\s*:\s*#fff3e0)[^>]*>\s*<p\b[^>]*>[\s\S]*?</p>\s*<p\b[^>]*>(?<question>[\s\S]*?)</p>\s*</div>\s*\z')
+    if (-not $questionMatch.Success) { throw '출처 바로 앞에 주황색 질문 상자가 있어야 합니다.' }
+    $questionText = [regex]::Replace([Net.WebUtility]::HtmlDecode($questionMatch.Groups['question'].Value),'<[^>]+>','').Trim()
+    if ($questionText.Length -lt 45 -or $questionText.Length -gt 90 -or ([regex]::Matches($questionText,'\?').Count -ne 1) -or -not $questionText.EndsWith('?')) { throw '질문은 전체 내용을 반영한 45~90자의 한 문장이어야 하며 물음표는 끝에 하나만 있어야 합니다.' }
     $sourceBlock = $sourceMatches[0].Groups['content'].Value
     if ($sourceBlock -notmatch '(?is)<(?:p|h[2-6])\b[^>]*>\s*(?:<strong>\s*)?출처(?:\s*</strong>)?\s*</(?:p|h[2-6])>') { throw '출처 영역의 제목은 출처여야 합니다.' }
     $sourceAnchors = @([regex]::Matches($sourceBlock,'(?is)<a\b[^>]*\bhref\s*=\s*["''](?<url>https?://[^"'']+)["''][^>]*>(?<text>[\s\S]*?)</a>'))
     if ($sourceAnchors.Count -lt 1 -or $sourceAnchors.Count -gt 3) { throw '출처 영역의 클릭 가능한 원문 링크는 1~3개여야 합니다.' }
+    $sourceLine = [regex]::Match($sourceBlock,'(?is)<p\b[^>]*>\s*<a\b[^>]*>[\s\S]*?</a>(?:\s*,\s*<a\b[^>]*>[\s\S]*?</a>){0,2}\s*</p>')
+    if (-not $sourceLine.Success -or [regex]::Matches($sourceLine.Value,'(?is)<a\b').Count -ne $sourceAnchors.Count) { throw '출처 링크는 한 줄에 표시하고 쉼표와 공백으로 구분해야 합니다.' }
     $sourceUrls = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $selectedFound = $false
     foreach ($anchor in $sourceAnchors) {
@@ -228,7 +235,7 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
         if (-not $url) { throw '출처 영역에 올바르지 않은 URL이 있습니다.' }
         if (-not $sourceUrls.Add($url)) { throw '출처 영역에 같은 URL이 중복되었습니다.' }
         $text = [regex]::Replace([Net.WebUtility]::HtmlDecode($anchor.Groups['text'].Value),'<[^>]+>','').Trim()
-        if ($text -notmatch '^.+\s—\s.+$') { throw "출처 링크 문구는 '사이트명 — 실제 기사 제목' 형식이어야 합니다." }
+        if ([string]::IsNullOrWhiteSpace($text) -or $text.Length -gt 80 -or $text -match '(?i)https?://|www\.|/|—') { throw '출처 링크에는 URL이나 기사 제목 대신 매체명·기관명만 표시해야 합니다.' }
         if ($url -eq $expectedComparableUrl) {
             if ($text -notmatch [regex]::Escape($expectedSourceSite)) { throw ("선택 기사 출처 링크에는 사이트명이 포함되어야 합니다: {0}" -f $expectedSourceSite) }
             $selectedFound = $true
