@@ -14,16 +14,20 @@ function Show-Preflight {
 
 function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state) {
     $writePrompt = [IO.File]::ReadAllText((Join-Path $script:PromptDir '02_최종_글쓰기_프롬프트.md'),[Text.Encoding]::UTF8)
+    $existingPosts = @(Get-ExistingPosts)
+    $existingPostContext = Format-ExistingPostContext $existingPosts
+    $allowedRelatedUrls = @($existingPosts | ForEach-Object Url)
+    Write-Host ("기존 게시글 {0}건을 중복·관련 글 점검에 사용합니다." -f $existingPosts.Count)
     $completed = New-Object System.Collections.ArrayList
     foreach ($old in @($state.Completed)) { [void]$completed.Add($old) }
     $failed = New-Object System.Collections.ArrayList
     foreach ($item in $selected) {
         Write-Host ("{0}번 글을 작성하고 있습니다." -f $item.Number)
         try {
-            $prompt = $writePrompt.TrimEnd()+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
+            $prompt = $writePrompt.TrimEnd()+"`n`n"+$existingPostContext+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
             $rawPath = Join-Path $run ('{0:D2}_글쓰기_원본_{1}.txt' -f ([int]$item.Number),(Get-Date -Format 'yyyyMMdd_HHmmss'))
             $response = Invoke-Codex $prompt $rawPath
-            $article = Split-Article $response $item.Site $item.Url
+            $article = Split-Article $response $item.Site $item.Url $allowedRelatedUrls
             $path = Save-Article $item $article
             Add-UsedUrl $item.Url
             [void]$completed.Add([pscustomobject]@{ Number=$item.Number; Path=$path; CompletedAt=(Get-Date).ToString('o') })
@@ -53,6 +57,7 @@ function Start-Workflow {
     $state = [pscustomobject]@{ Version=1; Status='소재 검색 중'; CreatedAt=(Get-Date).ToString('o'); UpdatedAt=(Get-Date).ToString('o'); Candidates=@(); SelectedNumbers=@(); Completed=@(); Failed=@() }
     Save-RunState $run $state
     $searchPrompt = [IO.File]::ReadAllText((Join-Path $script:PromptDir '01_소재_URL_프롬프트.md'),[Text.Encoding]::UTF8)
+    $searchPrompt = $searchPrompt.TrimEnd()+"`n`n"+(Format-ExistingPostContext @(Get-ExistingPosts))+"`n"
     Write-Host '최신 소재를 찾고 있습니다. 잠시 기다려 주세요.'
     try {
         try {
