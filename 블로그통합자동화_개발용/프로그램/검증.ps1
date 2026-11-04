@@ -159,6 +159,10 @@ $searchFailureState.Status = '검증 완료'
 $searchFailureState.Failed = @()
 Save-RunState $searchFailureRun $searchFailureState
 
-$report = ($results.ToArray() -join "`n")+"`n샘플 경로: $testFolder`n"
+$testBackup = Get-ArticleBackupPath $testFolder
+if ([IO.Directory]::Exists($testFolder)) { Remove-Item -LiteralPath $testFolder -Recurse -Force }
+if ([IO.Directory]::Exists($testBackup)) { Remove-Item -LiteralPath $testBackup -Recurse -Force }
+$results.Add('검증용 결과 파일 정리: 통과')
+$report = ($results.ToArray() -join "`n")+"`n"
 [IO.File]::WriteAllText((Join-Path $run '검증결과.txt'),$report,$script:Utf8)
 Write-Output $report

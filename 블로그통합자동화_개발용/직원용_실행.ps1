@@ -3,6 +3,10 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $root=$PSScriptRoot
 $entry=Join-Path $root '프로그램\시작.ps1'
+$watcher=Join-Path $root '프로그램\이미지_감시.ps1'
+if([IO.File]::Exists($watcher)){
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$watcher+'"')) -WindowStyle Hidden
+}
 function Start-Task([string[]]$arguments,[switch]$KeepOpen){
     $all=@('-NoProfile','-ExecutionPolicy','Bypass')
     if($KeepOpen){$all += '-NoExit'}
