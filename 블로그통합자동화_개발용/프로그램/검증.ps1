@@ -18,6 +18,10 @@ $state.Status='일부 실패';Save-RunState $stateRun $state
 $loaded=Read-RunState $stateRun
 Assert ($loaded.Status -eq '일부 실패' -and @($loaded.Failed).Count -eq 1) '작업상태 원자 저장·읽기'
 Assert ((Get-LatestRetryableRun) -eq $stateRun) '최근 실패 작업 찾기'
+$searchFailureRun=New-RunDirectory '글작성'
+$searchFailureState=[pscustomobject]@{Status='실패';UpdatedAt='';Completed=@();Failed=@([pscustomobject]@{Candidate=$null;Message='소재 검색 시험 실패'})}
+Save-RunState $searchFailureRun $searchFailureState
+Assert ((Get-LatestRetryableRun) -eq $stateRun) '후보 없는 소재 검색 실패를 글 재시도에서 제외'
 $results.Add('작업상태 저장·실패 재시도 대상 탐색: 통과')
 
 $sample = @'
@@ -73,6 +77,13 @@ $article = Split-Article $response 'TechCrunch' $articleUrl
 Assert ($article.ImagePrompts -match '4\. 전망') '이미지 프롬프트 분리'
 Assert ($article.Html -match 'data-blog-sources="true"') '질문 아래 출처 영역'
 Assert ([regex]::Matches($article.Html,'https://techcrunch\.com/2026/09/30/example-one/').Count -eq 2) '본문 링크와 출처 URL 일치'
+$officialUrl = 'https://www.iea.org/reports/energy-and-ai'
+$companyUrl = 'https://www.proenergyservices.com/news/example-announcement'
+$supportingSources = '<p><a href="'+$officialUrl+'">IEA — Energy and AI</a></p><p><a href="'+$companyUrl+'">PROENERGY — Example Announcement</a></p>'
+$multiSourceHtml = $html.Replace('</div>'+"`n"+'</div>',$supportingSources+'</div>'+"`n"+'</div>')
+$multiSourceResponse = '```html'+"`n"+$multiSourceHtml+"`n"+'```'+"`n`n"+$metadata
+$multiSourceArticle = Split-Article $multiSourceResponse 'TechCrunch' $articleUrl
+Assert ([regex]::Matches($multiSourceArticle.Html,'(?is)<a\b[^>]*href=').Count -eq 4) '선택 기사와 서로 다른 공식 보조 출처 허용'
 try {
     $badResponse=$response.Replace('<p><a href="'+$articleUrl+'">중요한 원문 확인</a></p>','<p><a href="https://example.com/not-listed">중요한 원문 확인</a></p>')
     Split-Article $badResponse 'TechCrunch' $articleUrl | Out-Null
@@ -138,6 +149,15 @@ foreach($number in 1..4){Assert ($preview -match ('압축이미지/{0:D2}\.webp'
 Assert ([IO.Directory]::Exists((Join-Path (Get-ArticleBackupPath $testFolder) '원본이미지'))) '원본 이미지 백업'
 Assert (@(Get-ChildItem -LiteralPath $script:TemporaryDir -Directory).Count -eq 0) '성공한 이미지 변환 임시 폴더 정리'
 $results.Add('이미지 4장 WebP 변환·순서·원본 보존·백업·미리보기: 통과')
+
+# 검증 중 의도적으로 만든 실패 상태가 실제 직원용 '최근 실패 작업 재시도'에
+# 섞이지 않도록 시험 작업을 완료 상태로 정리한다.
+$state.Status = '검증 완료'
+$state.Failed = @()
+Save-RunState $stateRun $state
+$searchFailureState.Status = '검증 완료'
+$searchFailureState.Failed = @()
+Save-RunState $searchFailureRun $searchFailureState
 
 $report = ($results.ToArray() -join "`n")+"`n샘플 경로: $testFolder`n"
 [IO.File]::WriteAllText((Join-Path $run '검증결과.txt'),$report,$script:Utf8)

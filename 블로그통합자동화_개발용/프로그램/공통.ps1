@@ -65,7 +65,7 @@ function Get-LatestRetryableRun {
         if (-not [IO.File]::Exists($statePath)) { continue }
         try {
             $state = Read-RunState $folder.FullName
-            if (@($state.Failed).Count -gt 0) { return $folder.FullName }
+            if (@($state.Failed | Where-Object { $null -ne $_.Candidate }).Count -gt 0) { return $folder.FullName }
         } catch { Write-ErrorLog ('재시도 상태 읽기 실패: '+$_.Exception.Message) }
     }
     return $null
@@ -228,8 +228,11 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
         if (-not $url) { throw '출처 영역에 올바르지 않은 URL이 있습니다.' }
         if (-not $sourceUrls.Add($url)) { throw '출처 영역에 같은 URL이 중복되었습니다.' }
         $text = [regex]::Replace([Net.WebUtility]::HtmlDecode($anchor.Groups['text'].Value),'<[^>]+>','').Trim()
-        if ($text -notmatch [regex]::Escape($expectedSourceSite) -or $text -notmatch '\s—\s') { throw ("출처 링크 문구는 '사이트명 — 실제 기사 제목' 형식이어야 합니다: {0}" -f $expectedSourceSite) }
-        if ($url -eq $expectedComparableUrl) { $selectedFound = $true }
+        if ($text -notmatch '^.+\s—\s.+$') { throw "출처 링크 문구는 '사이트명 — 실제 기사 제목' 형식이어야 합니다." }
+        if ($url -eq $expectedComparableUrl) {
+            if ($text -notmatch [regex]::Escape($expectedSourceSite)) { throw ("선택 기사 출처 링크에는 사이트명이 포함되어야 합니다: {0}" -f $expectedSourceSite) }
+            $selectedFound = $true
+        }
     }
     if (-not $selectedFound) { throw '출처 영역에 사용자가 선택한 실제 기사 URL이 없습니다.' }
     $htmlWithoutSource = $html.Remove($sourceMatches[0].Index,$sourceMatches[0].Length)
