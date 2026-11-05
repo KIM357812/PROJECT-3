@@ -299,6 +299,14 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
 
     $imageTags = @([regex]::Matches($html,'(?is)<img\b[^>]*>'))
     if ($imageTags.Count -ne 4) { throw '본문 이미지 placeholder가 4개가 아닙니다.' }
+    $imageWrappers = @([regex]::Matches($html,'(?is)<div\b(?=[^>]*\bdata-blog-image-wrap\s*=\s*["'']true["''])(?<attrs>[^>]*)>'))
+    if ($imageWrappers.Count -ne 4) { throw '네 이미지에는 위·아래 간격을 유지하는 부모 영역이 각각 필요합니다.' }
+    foreach ($wrapper in $imageWrappers) {
+        $wrapperAttrs = $wrapper.Groups['attrs'].Value
+        if ($wrapperAttrs -notmatch '(?i)margin\s*:\s*28px\s+0(?:px)?\s+28px\s+0(?:px)?' -or $wrapperAttrs -notmatch '(?i)text-align\s*:\s*center') {
+            throw '이미지 부모 영역은 위·아래 28px 간격과 가운데 정렬을 지켜야 합니다.'
+        }
+    }
     for ($i=0; $i -lt $imageTags.Count; $i++) {
         $tag = $imageTags[$i].Value
         $style = [regex]::Match($tag,'(?is)\bstyle\s*=\s*["''](?<value>[^"'']+)["'']').Groups['value'].Value
@@ -491,8 +499,66 @@ function Invoke-Codex([string]$prompt, [string]$outputPath) {
     } finally { $process.Dispose() }
 }
 
+function New-FactCheckRepairPrompt([string]$response, [string]$expectedArticleUrl) {
+    return @"
+아래 블로그 글 생성 응답은 내부 사실검증 항목이 3개 미만이라 프로그램 검증을 통과하지 못했습니다.
+공개 본문 HTML과 ## 1~5 공개 메타데이터는 내용과 형식을 바꾸지 말고, ## 6. 내부 사실검증표만 보완한 전체 응답을 다시 출력하세요.
+
+필수 조건:
+1. 검증 항목을 최소 3개 작성합니다.
+2. 각 항목은 `### 검증 1` 형식의 제목과 핵심 주장, 구분, 확인 URL, 확인일, 검증 결과, 정정 내용을 모두 포함합니다.
+3. 구분은 원문 사실, 보완 자료, 일반 기술 배경, 작성자 분석 중 하나만 사용합니다.
+4. 사실·수치·날짜 항목은 실제 http 또는 https 확인 URL을 사용하고, 작성자 분석만 확인 URL을 `해당 없음`으로 쓸 수 있습니다.
+5. 선택한 원문 URL `$expectedArticleUrl`의 검증 기록을 반드시 포함합니다.
+6. 확인하지 않은 사실이나 URL을 만들지 마세요. 근거가 부족하면 공개 자료에서 확인한 뒤 기록하세요.
+7. HTML 코드 블록부터 ## 6. 내부 사실검증표까지 전체 응답을 빠짐없이 반환합니다.
+
+--- 보완할 원래 응답 시작 ---
+$response
+--- 보완할 원래 응답 끝 ---
+"@
+}
+
+function Resolve-ArticleWithFactCheckRepair(
+    [string]$response,
+    [string]$expectedSourceSite,
+    [string]$expectedArticleUrl,
+    [object[]]$allowedRelatedUrls=@(),
+    [string]$repairOutputPath='',
+    [scriptblock]$repairInvoker=$null
+) {
+    try {
+        return Split-Article $response $expectedSourceSite $expectedArticleUrl $allowedRelatedUrls
+    } catch {
+        if ($_.Exception.Message -notmatch '내부 사실검증표에는 검증 항목이 3개 이상 필요합니다') { throw }
+    }
+
+    Write-Host '내부 사실검증표가 부족하여 한 번 자동 보완합니다.' -ForegroundColor Yellow
+    $repairPrompt = New-FactCheckRepairPrompt $response $expectedArticleUrl
+    if ($null -ne $repairInvoker) {
+        $repairedResponse = & $repairInvoker $repairPrompt $repairOutputPath
+    } else {
+        if (-not $repairOutputPath) { throw '사실검증 자동 보완 응답을 저장할 경로가 없습니다.' }
+        $repairedResponse = Invoke-Codex $repairPrompt $repairOutputPath
+    }
+    $factHeading = '## 6. 내부 사실검증표'
+    $originalFactIndex = $response.IndexOf($factHeading,[StringComparison]::Ordinal)
+    $repairedFactIndex = $repairedResponse.IndexOf($factHeading,[StringComparison]::Ordinal)
+    if ($originalFactIndex -lt 0 -or $repairedFactIndex -lt 0) { throw '사실검증 자동 보완 결과에서 내부 사실검증표 제목을 찾지 못했습니다.' }
+    $originalPublic = $response.Substring(0,$originalFactIndex).TrimEnd()
+    $repairedPublic = $repairedResponse.Substring(0,$repairedFactIndex).TrimEnd()
+    if ($originalPublic -cne $repairedPublic) { throw '사실검증 자동 보완 과정에서 공개 본문 또는 메타데이터가 변경되어 결과를 차단했습니다.' }
+    return Split-Article $repairedResponse $expectedSourceSite $expectedArticleUrl $allowedRelatedUrls
+}
+
 function Convert-ToBloggerHtml([string]$html) {
     $result = [regex]::Replace($html,'(?is)\A\s*<div\b[^>]*>','<div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family: ''Apple SD Gothic Neo'', ''Malgun Gothic'', sans-serif; color: #222; box-sizing: border-box; clear: both;">',1)
+    $imageWrapperMatches = @([regex]::Matches($result,'(?is)<div\b(?=[^>]*\bdata-blog-image-wrap\s*=\s*["'']true["''])[^>]*>'))
+    if ($imageWrapperMatches.Count -ne 4) { throw 'Blogger용 본문에는 이미지 간격 영역이 정확히 4개 필요합니다.' }
+    $imageWrapperTag = '<div data-blog-image-wrap="true" style="text-align: center; width: 100%; margin: 28px 0 28px 0; clear: both; box-sizing: border-box;">'
+    for ($i=$imageWrapperMatches.Count-1; $i -ge 0; $i--) {
+        $result = $result.Remove($imageWrapperMatches[$i].Index,$imageWrapperMatches[$i].Length).Insert($imageWrapperMatches[$i].Index,$imageWrapperTag)
+    }
     $imageMatches = @([regex]::Matches($result,'(?is)<img\b[^>]*>'))
     if ($imageMatches.Count -ne 4) { throw 'Blogger용 본문에는 이미지 위치가 정확히 4개 필요합니다.' }
     for ($i=$imageMatches.Count-1; $i -ge 0; $i--) {

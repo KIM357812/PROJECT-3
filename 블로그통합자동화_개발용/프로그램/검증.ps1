@@ -59,21 +59,21 @@ $paragraphStyle = 'font-weight: 400; width: 100%; margin: 0 0 18px 0; line-heigh
 $filler = ('검증 가능한 기술 정보와 사업 조건을 독자가 추가 검색 없이 이해하도록 사실과 분석을 구분하여 설명합니다. ' * 6).Trim()
 $html = @'
 <div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; color: #222; box-sizing: border-box; clear: both;">
-<style>@media (max-width: 600px) { .solidb-responsive-table table, .solidb-responsive-table thead, .solidb-responsive-table tbody, .solidb-responsive-table tr, .solidb-responsive-table th, .solidb-responsive-table td { display: block; width: 100% !important; } .solidb-responsive-table thead { position: absolute; width: 1px !important; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } .solidb-responsive-table tr { margin: 0 0 12px 0; border: 1px solid #ddd; border-radius: 4px; } .solidb-responsive-table td { display: grid !important; grid-template-columns: minmax(105px, 40%) 1fr; gap: 10px; padding: 10px 12px !important; text-align: left !important; box-sizing: border-box; } .solidb-responsive-table td::before { content: attr(data-label); font-weight: 700; color: #333; } }</style>
-FIRST_IMAGE
+<style>@media (max-width: 600px) { .solidb-responsive-table table, .solidb-responsive-table thead, .solidb-responsive-table tbody, .solidb-responsive-table tr, .solidb-responsive-table th, .solidb-responsive-table td { display: block; width: 100% !important; } .solidb-responsive-table thead { position: absolute; width: 1px !important; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } .solidb-responsive-table tr { margin: 0 0 12px 0; border: 1px solid #ddd; border-radius: 4px; } .solidb-responsive-table td { display: grid !important; grid-template-columns: minmax(92px, 34%) minmax(0, 1fr); gap: 10px; padding: 10px 12px !important; font-size: 14px; line-height: 1.55; text-align: left !important; word-break: keep-all; overflow-wrap: anywhere; box-sizing: border-box; } .solidb-responsive-table td::before { content: attr(data-label); font-weight: 700; color: #333; } }</style>
+<div data-blog-image-wrap="true" style="text-align: center; width: 100%; margin: 28px 0 28px 0; clear: both; box-sizing: border-box;">FIRST_IMAGE</div>
 <p style="PARAGRAPH_STYLE">FILLER <a href="ARTICLE_URL">중요한 원문 확인</a></p>
 <h2>현황과 핵심 쟁점</h2>
-LAZY_IMAGE_2
+<div data-blog-image-wrap="true" style="text-align: center; width: 100%; margin: 28px 0 28px 0; clear: both; box-sizing: border-box;">LAZY_IMAGE_2</div>
 <p style="PARAGRAPH_STYLE">FILLER</p>
 <h2>기술 원리와 도입 배경</h2>
 <p style="PARAGRAPH_STYLE">FILLER</p>
 <div data-blog-six-facts="true" style="font-weight: 400; text-align: justify; text-align-last: left; word-break: keep-all; overflow-wrap: anywhere;"><strong>누가 (Who) : </strong>시험 기업<br><strong>무엇을 (What) : </strong>기술 검증<br><strong>언제 (When) : </strong>2026-09-30<br><strong>어디서 (Where) : </strong>시험 지역<br><strong>어떻게 (How) : </strong>검증 절차<br><strong>왜 (Why) : </strong>품질 향상</div>
 <div class="solidb-responsive-table"><table><thead><tr><th>항목</th><th>기간</th></tr></thead><tbody><tr><td data-label="항목">시험 기술</td><td data-label="기간">24개월</td></tr></tbody></table></div>
 <h2>시장 영향과 다음 단계</h2>
-LAZY_IMAGE_3
+<div data-blog-image-wrap="true" style="text-align: center; width: 100%; margin: 28px 0 28px 0; clear: both; box-sizing: border-box;">LAZY_IMAGE_3</div>
 <h3>사업화 조건</h3>
 <p style="PARAGRAPH_STYLE">FILLER</p>
-LAZY_IMAGE_4
+<div data-blog-image-wrap="true" style="text-align: center; width: 100%; margin: 28px 0 28px 0; clear: both; box-sizing: border-box;">LAZY_IMAGE_4</div>
 <h3>종합 판단</h3>
 <p style="PARAGRAPH_STYLE">FILLER</p>
 <div style="background:#fff3e0"><p>다음 선택</p><p>이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?</p></div>
@@ -170,6 +170,28 @@ $numberedMetadata = [regex]::Replace($numberedMetadata,'(?m)^- (구분|확인 UR
 $numberedArticle = Split-Article ('```html'+"`n"+$html+"`n"+'```'+"`n`n"+$numberedMetadata) 'TechCrunch' $articleUrl
 Assert ($numberedArticle.FactCheck -match '(?m)^3\. 핵심 주장:') '사실검증 번호 목록 형식 허용'
 $results.Add('사실검증 소제목·번호 목록 형식 호환: 통과')
+$twoFactMetadata = [regex]::Replace($metadata,'(?ms)^### 검증 3\r?\n.*\z','')
+$twoFactResponse = '```html'+"`n"+$html+"`n"+'```'+"`n`n"+$twoFactMetadata
+$repairState = @{ Count=0; Prompt='' }
+$repairMock = {
+    param($repairPrompt,$repairOutputPath)
+    $repairState.Count++
+    $repairState.Prompt = $repairPrompt
+    return $response
+}.GetNewClosure()
+$repairedArticle = Resolve-ArticleWithFactCheckRepair $twoFactResponse 'TechCrunch' $articleUrl @() '시험_사실검증보완.txt' $repairMock
+Assert ($repairState.Count -eq 1) '사실검증 부족 시 자동 보완 한 번 실행'
+Assert ($repairState.Prompt -match '공개 본문 HTML과 ## 1~5 공개 메타데이터는 내용과 형식을 바꾸지 말고') '자동 보완에서 공개 내용 보존 지시'
+Assert ($repairState.Prompt -match [regex]::Escape($articleUrl)) '자동 보완에 선택 원문 URL 전달'
+Assert ($repairedArticle.FactCheck -match '### 검증 3') '자동 보완 결과 재검증'
+$changedPublicMock = { param($repairPrompt,$repairOutputPath) return $response.Replace('기술 검증이 바꾸는 Blogger 자동화의 핵심','자동 보완이 바꾼 공개 제목') }.GetNewClosure()
+$changedPublicBlocked = $false
+try { [void](Resolve-ArticleWithFactCheckRepair $twoFactResponse 'TechCrunch' $articleUrl @() '시험_공개변경차단.txt' $changedPublicMock) } catch { $changedPublicBlocked = $_.Exception.Message -match '공개 본문 또는 메타데이터가 변경' }
+Assert $changedPublicBlocked '자동 보완 중 공개 본문·메타데이터 변경 차단'
+$noRepairMock = { throw '정상 응답에서 자동 보완이 실행됐습니다.' }
+$validWithoutRepair = Resolve-ArticleWithFactCheckRepair $response 'TechCrunch' $articleUrl @() '사용하지_않음.txt' $noRepairMock
+Assert ($validWithoutRepair.FactCheck -match '### 검증 3') '정상 응답은 자동 보완 없이 통과'
+$results.Add('사실검증 3개 미만 자동 보완 1회·재검증: 통과')
 try {
     $shortQuestion=$response.Replace('이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?','짧은 질문인가요?')
     Split-Article $shortQuestion 'TechCrunch' $articleUrl | Out-Null
@@ -253,6 +275,7 @@ Assert ([IO.File]::ReadAllText((Join-Path $saved '메타데이터.txt'),[Text.En
 $bloggerHtml = [IO.File]::ReadAllText((Join-Path $saved 'Blogger에_붙여넣을_본문.html'),[Text.Encoding]::UTF8)
 Assert ($bloggerHtml -match '(?is)\A<div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 20px; font-family:') 'Blogger 본문 최대 800px·가운데 정렬·기존 디자인 유지'
 Assert ([regex]::Matches($bloggerHtml,'(?is)<img\b[^>]*max-width:\s*400px[^>]*>').Count -eq 4) 'Blogger 이미지 최대 400px·모바일 자동 조절'
+Assert ([regex]::Matches($bloggerHtml,'(?is)<div\b(?=[^>]*data-blog-image-wrap="true")(?=[^>]*margin:\s*28px\s+0\s+28px\s+0)[^>]*>').Count -eq 4) 'Blogger 이미지 위·아래 28px 간격 유지'
 Assert ((Get-BloggerHostedImageCount $saved) -eq 0) '업로드 전에는 Blogger 실제 이미지 주소 없음'
 foreach ($name in @('사실검증표.md','이미지_프롬프트.txt','이미지_생성용_전체프롬프트.txt','작업정보.json')) {
     Assert (([IO.File]::GetAttributes((Join-Path $saved $name)) -band [IO.FileAttributes]::Hidden) -ne 0) "내부 파일 숨김 $name"
@@ -262,7 +285,7 @@ foreach ($number in 1..4) {
     $single = [IO.File]::ReadAllText((Join-Path $saved ('Gemini_이미지_{0:D2}.txt' -f $number)),[Text.Encoding]::UTF8)
     Assert ([regex]::Matches($single,'(?m)^###\s*[1-4]\.').Count -eq 1) "Gemini 이미지 $number 개별 분리"
 }
-$results.Add('Blogger 게시용 본문 표시·800px 본문·400px 이미지: 통과')
+$results.Add('Blogger 게시용 본문 표시·800px 본문·400px 이미지·상하 간격: 통과')
 
 $testFolder = $saved
 Assert ([IO.File]::ReadAllText((Join-Path $savedBackup '본문.html'),[Text.Encoding]::UTF8).Contains('placeholder')) 'UTF-8 내부 본문 저장'

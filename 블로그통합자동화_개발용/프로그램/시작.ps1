@@ -27,7 +27,8 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
             $prompt = $writePrompt.TrimEnd()+"`n`n"+$existingPostContext+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
             $rawPath = Join-Path $run ('{0:D2}_글쓰기_원본_{1}.txt' -f ([int]$item.Number),(Get-Date -Format 'yyyyMMdd_HHmmss'))
             $response = Invoke-Codex $prompt $rawPath
-            $article = Split-Article $response $item.Site $item.Url $allowedRelatedUrls
+            $repairPath = Join-Path $run ('{0:D2}_사실검증보완_{1}.txt' -f ([int]$item.Number),(Get-Date -Format 'yyyyMMdd_HHmmss'))
+            $article = Resolve-ArticleWithFactCheckRepair $response $item.Site $item.Url $allowedRelatedUrls $repairPath
             $path = Save-Article $item $article
             Add-UsedUrl $item.Url
             [void]$completed.Add([pscustomobject]@{ Number=$item.Number; Path=$path; CompletedAt=(Get-Date).ToString('o') })
