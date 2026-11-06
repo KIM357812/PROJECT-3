@@ -28,6 +28,17 @@ try {
         }
         title = 'AI 데이터센터 전력 이슈를 모바일에서 읽는 법 <안전>'
         body = $body
+        editorBlocks = @(
+            [pscustomobject]@{ id='p1'; type='BodyParagraph'; text='검증된 도입부입니다.' },
+            [pscustomobject]@{ id='c1'; type='Callout'; calloutKind='FiveWOneH'; text="육하원칙 한눈에 보기`n누가 : 시험 기업`n무엇을 : 검증 기술" },
+            [pscustomobject]@{ id='p2'; type='BodyParagraph'; text='핵심을 이어 설명합니다.' },
+            [pscustomobject]@{ id='c2'; type='Callout'; calloutKind='KeySummary'; text="핵심만 먼저 보면`n• 첫 번째 핵심`n• 두 번째 핵심" },
+            [pscustomobject]@{ id='h1'; type='SectionHeading'; text='핵심만 먼저 보면' },
+            [pscustomobject]@{ id='i1'; type='Image'; text=''; fileName='01-대표.jpg'; role='대표'; altText='AI 데이터센터와 전력망' },
+            [pscustomobject]@{ id='c3'; type='Callout'; calloutKind='OperatorJudgment'; text="운영자의 판단 : 검증 기준`n• 확인된 사실 : 공식자료 확인" },
+            [pscustomobject]@{ id='q1'; type='ReaderQuestion'; text='어떤 기준이 필요할까요?' },
+            [pscustomobject]@{ id='r1'; type='ReferenceLine'; text='참고자료 : TechCrunch'; links=@([pscustomobject]@{text='TechCrunch';url='https://techcrunch.com/example?x=1&y=2'}) }
+        )
         sectionHeadings = $sectionHeadings
         tags = @('AI','데이터센터','전력산업','스마트그리드','기술동향')
         sources = @([pscustomobject]@{
@@ -66,7 +77,7 @@ try {
         throw 'The local mobile preview was not created safely.'
     }
     $html = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8
-    foreach ($required in @('width:390px', 'name="viewport"', '&lt;안전&gt;', 'Verified &lt;article&gt;', 'x=1&amp;y=2', '<h2 class="section-heading">핵심만 먼저 보면</h2>', 'font-size:24px', 'font-size:19px', 'font-size:16px', 'width:340px', 'font-weight:700', 'margin:35px 0 15px', 'border-bottom:2px solid #1a73e8', 'margin:0 0 18px', 'line-height:28px', '.callout-summary', 'background:#e3fdc8', 'background:#f7f7f7', 'background:#ffe3c8', 'border-left:4px solid', 'border-radius:4px', 'padding:16px 18px', 'border-left-color:#66a33b', 'color:#555555', 'color:#36851e', 'color:#b85c00', '.callout-title { display:block; margin:0 0 8px; color:inherit; font-size:15px; font-weight:700; }', '.callout-summary { margin-top:30px; margin-bottom:20px; }', '.callout-summary .callout-title { margin-bottom:10px;', '.callout-judgment { margin-top:30px; margin-bottom:20px; }', '.callout p { margin:0 0 18px; line-height:1.75; }', '.callout p:last-child { margin-bottom:0; }', 'overflow-wrap:anywhere', '.five-w-one-h-label', 'margin:22px auto', '네이버 실제 모바일 화면과 동일함을 보장하지 않습니다.')) {
+    foreach ($required in @('width:390px', 'name="viewport"', '&lt;안전&gt;', 'x=1&amp;y=2', '<h2 class="section-heading">핵심만 먼저 보면</h2>', 'font-size:24px', 'font-size:19px', 'font-size:16px', 'width:340px', 'font-weight:700', 'margin:35px 0 15px', 'border-bottom:2px solid #1a73e8', 'margin:0 0 18px', 'line-height:28px', '.callout-five', '.callout-summary', 'background:#e3fdc8', 'background:#f7f7f7', 'background:#ffe3c8', 'border-left:4px solid', 'border-radius:4px', 'padding:16px 18px', 'border-left-color:#66a33b', 'color:#2f7d19', 'color:#4d4d4d', 'color:#b85c00', '.callout-title { display:block; margin:0 0 8px; color:inherit; font-size:15px; font-weight:700; }', '.callout-summary { margin-top:30px; margin-bottom:20px; }', '.callout-five .callout-title { margin-bottom:10px;', '.callout-judgment { margin-top:30px; margin-bottom:20px; }', '.callout p { margin:0 0 18px; line-height:1.75; }', '.callout p:last-child { margin-bottom:0; }', 'overflow-wrap:anywhere', '.five-w-one-h-label', 'class="content-image-placeholder"', '01-대표.jpg', '어떤 기준이 필요할까요?', '참고자료 : <a href="https://techcrunch.com/example?x=1&amp;y=2"', 'margin:22px auto', '네이버 실제 모바일 화면과 동일함을 보장하지 않습니다.')) {
         if ($html.IndexOf($required, [StringComparison]::Ordinal) -lt 0) {
             throw "Mobile preview is missing encoded or responsive content: $required"
         }

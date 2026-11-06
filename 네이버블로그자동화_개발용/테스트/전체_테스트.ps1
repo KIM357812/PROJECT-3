@@ -2,8 +2,13 @@
 $ErrorActionPreference = 'Stop'
 
 $testRoot = $PSScriptRoot
+$projectRoot = Split-Path -Parent $testRoot
+$integrityValidator = Join-Path $projectRoot '프로그램\구글참조무결성검증.ps1'
+$integrityManifest = Join-Path $projectRoot '보호기준\google-reference-integrity.json'
+& $integrityValidator -Mode Verify -ManifestPath $integrityManifest
 $testFiles = @(
     '개발범위_테스트.ps1',
+    '구글참조무결성검증_테스트.ps1',
     '요구사항대조_테스트.ps1',
     '백업내보내기_테스트.ps1',
     '사실검증준비_테스트.ps1',
@@ -38,7 +43,6 @@ foreach ($testFile in $testFiles) {
     & $testPath
 }
 
-$projectRoot = Split-Path -Parent $testRoot
 $parseErrors = @()
 foreach ($scriptFile in Get-ChildItem -LiteralPath $projectRoot -Recurse -File -Filter '*.ps1') {
     $tokens = $null

@@ -132,11 +132,14 @@ try {
         ($plan.calloutFormatting.judgmentEvidenceLabels -join '|') -ne '확인된 사실|주의할 표현|운영자의 판단' -or
         -not $plan.calloutFormatting.requireFiveWOneHSummary -or
         $plan.calloutFormatting.styles.Count -ne 3 -or
-        $plan.calloutFormatting.styles[0].titleColor -ne '#555555' -or
-        $plan.calloutFormatting.styles[1].titleColor -ne '#36851e' -or
-        $plan.calloutFormatting.styles[2].titleColor -ne '#b85c00' -or
-        $plan.calloutFormatting.styles[0].titleMarginBottomPx -ne 8 -or
-        $plan.calloutFormatting.styles[1].titleMarginBottomPx -ne 10 -or
+        $plan.calloutFormatting.styles[0].kind -ne 'FiveWOneH' -or
+        $plan.calloutFormatting.styles[1].kind -ne 'KeySummary' -or
+        $plan.calloutFormatting.styles[2].kind -ne 'OperatorJudgment' -or
+        $plan.calloutFormatting.styles[0].titleColor -ne '#2f7d19' -or
+        $plan.calloutFormatting.styles[1].titleColor -ne '#4d4d4d' -or
+        $plan.calloutFormatting.styles[2].titleColor -ne '#a84f00' -or
+        $plan.calloutFormatting.styles[0].titleMarginBottomPx -ne 10 -or
+        $plan.calloutFormatting.styles[1].titleMarginBottomPx -ne 8 -or
         $plan.calloutFormatting.styles[2].titleMarginBottomPx -ne 8 -or
         $plan.calloutFormatting.styles[0].outerMarginTopPx -ne 30 -or
         $plan.calloutFormatting.styles[1].outerMarginTopPx -ne 30 -or

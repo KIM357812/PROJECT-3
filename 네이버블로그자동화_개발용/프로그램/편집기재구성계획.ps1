@@ -52,6 +52,16 @@ if ($rebuildScope -eq 'NamedSection') {
 }
 
 $allowedTypes = @($rules.AllowedEditorBlockTypes | ForEach-Object { [string]$_ })
+$calloutStyleByKind = @{}
+foreach ($style in @($rules.CalloutDesign.Styles)) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$style.Kind)) {
+        $calloutStyleByKind[[string]$style.Kind] = $style
+    }
+}
+$imageRoleByFileName = @{}
+foreach ($role in @($settings.ImageAutomation.Roles)) {
+    $imageRoleByFileName[[string]$role.OutputFileName] = $role
+}
 $ids = New-Object 'System.Collections.Generic.List[string]'
 $readerQuestionCount = 0
 $referenceLineCount = 0
@@ -68,6 +78,28 @@ for ($i = 0; $i -lt $blocks.Count; $i++) {
     }
     if ($type -ne 'Image' -and [string]::IsNullOrWhiteSpace([string]$block.text)) {
         $issues.Add("Editor block text is required at index $i.")
+    }
+    if ($type -eq 'Callout') {
+        $kind = [string]$block.calloutKind
+        if ([string]::IsNullOrWhiteSpace($kind) -or -not $calloutStyleByKind.ContainsKey($kind)) {
+            $issues.Add("Callout requires a supported calloutKind at index ${i}: $kind")
+        }
+        $lines = @(([string]$block.text -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($lines.Count -lt 2) {
+            $issues.Add("Callout requires a title and at least one body line at index $i.")
+        }
+    }
+    if ($type -eq 'Image') {
+        $fileName = [string]$block.fileName
+        if ([string]::IsNullOrWhiteSpace($fileName) -or -not $imageRoleByFileName.ContainsKey($fileName)) {
+            $issues.Add("Image requires a configured fileName at index ${i}: $fileName")
+        }
+        elseif ([string]$block.role -ne [string]$imageRoleByFileName[$fileName].Name) {
+            $issues.Add("Image role does not match the configured file at index $i.")
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$block.altText)) {
+            $issues.Add("Image requires altText at index $i.")
+        }
     }
     if ($type -eq 'ReferenceLine') {
         $links = @($block.links)
@@ -145,6 +177,50 @@ for ($i = 0; $i -lt $blocks.Count; $i++) {
             fontSizePx=[int]$rules.BodyFontSize
             lineHeight=[double]$rules.BodyLineHeight
         })
+    }
+    elseif ([string]$block.type -eq 'Callout') {
+        $insertAction.action = 'InsertCalloutTable'
+        $style = $calloutStyleByKind[[string]$block.calloutKind]
+        $insertAction | Add-Member -NotePropertyName calloutKind -NotePropertyValue ([string]$block.calloutKind)
+        $insertAction | Add-Member -NotePropertyName formatting -NotePropertyValue ([pscustomobject]@{
+            renderMode=[string]$rules.CalloutDesign.RenderMode
+            backgroundColor=[string]$style.BackgroundColor
+            accentColor=[string]$style.AccentColor
+            accentWidthPx=[int]$rules.CalloutDesign.LeftAccentWidthPx
+            titleColor=[string]$style.TitleColor
+            titleFontSizePx=[int]$rules.CalloutDesign.TitleFontSizePx
+            titleFontWeight=[int]$rules.CalloutDesign.TitleFontWeight
+            titleMarginBottomPx=[int]$style.TitleMarginBottomPx
+            bodyFontSizePx=[int]$rules.BodyFontSize
+            bodyLineHeight=[double]$rules.CalloutDesign.BodyLineHeight
+            paragraphMarginBottomPx=[int]$rules.CalloutDesign.ParagraphMarginBottomPx
+            innerPaddingVerticalPx=[int]$rules.CalloutDesign.InnerPaddingVerticalPx
+            innerPaddingHorizontalPx=[int]$rules.CalloutDesign.InnerPaddingHorizontalPx
+            outerMarginTopPx=[int]$style.OuterMarginTopPx
+            outerMarginBottomPx=[int]$style.OuterMarginBottomPx
+            borderRadiusPx=[int]$rules.CalloutDesign.BorderRadiusPx
+            forbidAdjacentBlankParagraphs=[bool]$rules.CalloutDesign.ForbidAdjacentBlankParagraphs
+        })
+        $insertAction.postcondition | Add-Member -NotePropertyName requireSingleCellTable -NotePropertyValue $true
+        $insertAction.postcondition | Add-Member -NotePropertyName requireNoHorizontalOverflow -NotePropertyValue $true
+        $insertAction.postcondition | Add-Member -NotePropertyName requireZeroAdjacentBlankParagraphs -NotePropertyValue $true
+    }
+    elseif ([string]$block.type -eq 'Image') {
+        $insertAction.action = 'InsertImage'
+        $insertAction | Add-Member -NotePropertyName fileName -NotePropertyValue ([string]$block.fileName)
+        $insertAction | Add-Member -NotePropertyName role -NotePropertyValue ([string]$block.role)
+        $insertAction | Add-Member -NotePropertyName altText -NotePropertyValue ([string]$block.altText)
+        $insertAction | Add-Member -NotePropertyName formatting -NotePropertyValue ([pscustomobject]@{
+            sourceWidthPx=[int]$settings.ImageAutomation.Width
+            sourceHeightPx=[int]$settings.ImageAutomation.Height
+            displayWidthPx=[int]$settings.ImageAutomation.EditorDisplayWidth
+            alignment=[string]$settings.ImageAutomation.EditorAlignment
+            aspectRatio=[string]$settings.ImageAutomation.AspectRatio
+            maximumKilobytes=[int]$settings.ImageAutomation.MaximumKilobytes
+        })
+        $insertAction.postcondition | Add-Member -NotePropertyName requireNaverHostedImage -NotePropertyValue $true
+        $insertAction.postcondition | Add-Member -NotePropertyName requireCenterAlignment -NotePropertyValue $true
+        $insertAction.postcondition | Add-Member -NotePropertyName requireDisplayWidthMeasurement -NotePropertyValue $true
     }
     if ([string]$block.type -eq 'ReferenceLine') {
         $insertAction | Add-Member -NotePropertyName links -NotePropertyValue @($block.links)

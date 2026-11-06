@@ -45,7 +45,7 @@ $headingLookup = @{}
 foreach ($sectionHeading in @($draft.sectionHeadings)) {
     $headingLookup[[string]$sectionHeading] = $true
 }
-$paragraphHtml = @($paragraphs | ForEach-Object {
+$fallbackParagraphHtml = @($paragraphs | ForEach-Object {
     $paragraphText = $_.Trim()
     $encoded = ConvertTo-HtmlText $paragraphText
     if ($headingLookup.ContainsKey($paragraphText)) {
@@ -55,6 +55,58 @@ $paragraphHtml = @($paragraphs | ForEach-Object {
         '<p>' + ($encoded -replace "`r?`n", '<br>') + '</p>'
     }
 }) -join "`r`n"
+
+$paragraphHtml = $fallbackParagraphHtml
+if ($draft.PSObject.Properties.Name -contains 'editorBlocks' -and @($draft.editorBlocks).Count -gt 0) {
+    $renderedBlocks = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($block in @($draft.editorBlocks)) {
+        $type = [string]$block.type
+        $encoded = ConvertTo-HtmlText ([string]$block.text)
+        if ($type -eq 'BodyParagraph') {
+            $renderedBlocks.Add('<p>' + ($encoded -replace "`r?`n", '<br>') + '</p>')
+        }
+        elseif ($type -eq 'SectionHeading') {
+            $renderedBlocks.Add('<h2 class="section-heading">' + $encoded + '</h2>')
+        }
+        elseif ($type -eq 'ReaderQuestion') {
+            $renderedBlocks.Add('<p class="reader-question">' + $encoded + '</p>')
+        }
+        elseif ($type -eq 'ReferenceLine') {
+            $links = @($block.links | ForEach-Object {
+                '<a href="' + (ConvertTo-HtmlText ([string]$_.url)) + '" target="_blank" rel="noopener noreferrer">' +
+                (ConvertTo-HtmlText ([string]$_.text)) + '</a>'
+            }) -join ', '
+            $renderedBlocks.Add('<p class="reference-line">참고자료 : ' + $links + '</p>')
+        }
+        elseif ($type -eq 'Image') {
+            $fileName = ConvertTo-HtmlText ([string]$block.fileName)
+            $altText = ConvertTo-HtmlText ([string]$block.altText)
+            $renderedBlocks.Add('<div class="content-image-placeholder" data-file="' + $fileName + '"><span>' + $fileName + '</span><small>' + $altText + '</small></div>')
+        }
+        elseif ($type -eq 'Callout') {
+            $kindClass = switch ([string]$block.calloutKind) {
+                'FiveWOneH' { 'callout-five' }
+                'KeySummary' { 'callout-summary' }
+                'OperatorJudgment' { 'callout-judgment' }
+                default { 'callout-summary' }
+            }
+            $lines = @(([string]$block.text -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $titleLine = if ($lines.Count -gt 0) { ConvertTo-HtmlText $lines[0].Trim() } else { '' }
+            $bodyLines = New-Object 'System.Collections.Generic.List[string]'
+            for ($lineIndex = 1; $lineIndex -lt $lines.Count; $lineIndex++) {
+                $line = $lines[$lineIndex].Trim()
+                $match = [regex]::Match($line, '^(누가|무엇을|언제|어디서|왜|어떻게)\s*:\s*(.+)$')
+                if ($match.Success) {
+                    $bodyLines.Add('<p><strong class="five-w-one-h-label">' + (ConvertTo-HtmlText $match.Groups[1].Value) + '</strong> : ' + (ConvertTo-HtmlText $match.Groups[2].Value) + '</p>')
+                } else {
+                    $bodyLines.Add('<p>' + (ConvertTo-HtmlText $line) + '</p>')
+                }
+            }
+            $renderedBlocks.Add('<div class="callout ' + $kindClass + '"><strong class="callout-title">' + $titleLine + '</strong>' + ($bodyLines.ToArray() -join '') + '</div>')
+        }
+    }
+    $paragraphHtml = $renderedBlocks.ToArray() -join "`r`n"
+}
 
 $sourceHtml = @($draft.sources | ForEach-Object {
     $name = ConvertTo-HtmlText ([string]$_.name)
@@ -67,6 +119,10 @@ $sourceSectionHtml = if (@($draft.sources).Count -gt 0) {
     "<h2>출처</h2>`r`n<ul>$sourceHtml</ul>"
 } else {
     ''
+}
+if ($draft.PSObject.Properties.Name -contains 'editorBlocks' -and
+    @($draft.editorBlocks | Where-Object { [string]$_.type -eq 'ReferenceLine' }).Count -gt 0) {
+    $sourceSectionHtml = ''
 }
 $tagHtml = @($draft.tags | ForEach-Object { '<span>#' + (ConvertTo-HtmlText ([string]$_)) + '</span>' }) -join ''
 $title = ConvertTo-HtmlText ([string]$draft.title)
@@ -89,8 +145,8 @@ $calloutMarginTop = [int]$config.NaverDraft.CalloutDesign.OuterMarginTopPx
 $calloutMarginBottom = [int]$config.NaverDraft.CalloutDesign.OuterMarginBottomPx
 $calloutBorderRadius = [int]$config.NaverDraft.CalloutDesign.BorderRadiusPx
 $calloutTitleFontSize = [int]$config.NaverDraft.CalloutDesign.TitleFontSizePx
-$calloutSummaryStyle = @($config.NaverDraft.CalloutDesign.Styles | Where-Object { $_.Name -eq '육하원칙·핵심요약' })[0]
-$calloutJudgmentStyle = @($config.NaverDraft.CalloutDesign.Styles | Where-Object { $_.Name -eq '운영자판단·결론' })[0]
+$calloutSummaryStyle = @($config.NaverDraft.CalloutDesign.Styles | Where-Object { $_.Kind -eq 'KeySummary' })[0]
+$calloutJudgmentStyle = @($config.NaverDraft.CalloutDesign.Styles | Where-Object { $_.Kind -eq 'OperatorJudgment' })[0]
 $calloutSummaryMarginTop = [int]$calloutSummaryStyle.OuterMarginTopPx
 $calloutSummaryMarginBottom = [int]$calloutSummaryStyle.OuterMarginBottomPx
 $calloutJudgmentMarginTop = [int]$calloutJudgmentStyle.OuterMarginTopPx
@@ -116,18 +172,24 @@ h2 { margin:30px 0 14px; font-size:18px; }
 .section-heading { margin:${headingMarginTop}px 0 ${headingMarginBottom}px; padding-bottom:6px; border-bottom:${headingDividerThickness}px solid $headingDividerColor; font-size:${sectionHeadingFontSize}px; line-height:1.55; font-weight:700; letter-spacing:-.02em; }
 .callout { box-sizing:border-box; width:100%; margin:${calloutMarginTop}px 0 ${calloutMarginBottom}px; padding:${calloutPaddingVertical}px ${calloutPaddingHorizontal}px; border:0; border-left:4px solid; border-radius:${calloutBorderRadius}px; font-size:${bodyFontSize}px; line-height:$calloutBodyLineHeight; overflow-wrap:anywhere; white-space:normal; }
 .callout-context { background:#f7f7f7; border-left-color:#777777; }
-.callout-summary { background:#e3fdc8; border-left-color:#66a33b; }
+.callout-five { background:#e3fdc8; border-left-color:#66a33b; }
+.callout-summary { background:#f7f7f7; border-left-color:#777777; }
 .callout-judgment { background:#ffe3c8; border-left-color:#ff9800; }
 .callout-title { display:block; margin:0 0 ${calloutTitleMarginBottom}px; color:inherit; font-size:${calloutTitleFontSize}px; font-weight:700; }
 .callout-context .callout-title { color:#555555; }
+.callout-five .callout-title { margin-bottom:10px; color:#2f7d19; }
 .callout-summary { margin-top:${calloutSummaryMarginTop}px; margin-bottom:${calloutSummaryMarginBottom}px; }
-.callout-summary .callout-title { margin-bottom:10px; color:#36851e; }
+.callout-summary .callout-title { margin-bottom:8px; color:#4d4d4d; }
 .callout-judgment { margin-top:${calloutJudgmentMarginTop}px; margin-bottom:${calloutJudgmentMarginBottom}px; }
 .callout-judgment .callout-title { margin-bottom:8px; color:#b85c00; }
 .callout p { margin:0 0 ${calloutParagraphMarginBottom}px; line-height:$calloutBodyLineHeight; }
 .callout p:last-child { margin-bottom:0; }
 .five-w-one-h-label { font-weight:700; }
 .content-image { display:block; width:${imageDisplayWidth}px; max-width:100%; height:auto; margin:22px auto; }
+.content-image-placeholder { box-sizing:border-box; width:${imageDisplayWidth}px; max-width:100%; min-height:180px; margin:22px auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; border:1px dashed #aab4c3; background:#f4f7fa; color:#526071; text-align:center; }
+.content-image-placeholder small { font-size:12px; line-height:1.5; }
+.reader-question { font-weight:700; }
+.reference-line { margin-top:32px; }
 ul { padding-left:20px; }
 li { margin-bottom:14px; font-size:14px; line-height:1.65; overflow-wrap:anywhere; }
 a { color:#0b63ce; }

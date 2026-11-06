@@ -39,8 +39,11 @@ for ($i = 0; $i -lt $limit; $i++) {
     if (-not [bool]$record.editorBodyFocusedBefore -or [bool]$record.toolbarOrDialogFocusedBefore) {
         $issues.Add("본문 편집 문단 포커스가 확인되지 않았습니다: $label")
     }
-    if ([int]$record.editorParagraphCountAfter -ne ($i + 1)) {
-        $issues.Add("동작 직후 편집기 문단 수가 예상값과 다릅니다: $label")
+    $logicalCount = if ($record.PSObject.Properties.Name -contains 'editorLogicalBlockCountAfter') {
+        [int]$record.editorLogicalBlockCountAfter
+    } else { [int]$record.editorParagraphCountAfter }
+    if ($logicalCount -ne ($i + 1)) {
+        $issues.Add("동작 직후 편집기 논리 블록 수가 예상값과 다릅니다: $label")
     }
 
     if ([string]$action.action -eq 'InsertBlock') {
@@ -73,6 +76,36 @@ for ($i = 0; $i -lt $limit; $i++) {
         if ([int]$record.fontSizePx -ne [int]$action.fontSizePx -or
             [Math]::Abs([double]$record.lineHeight - [double]$action.lineHeight) -gt 0.001) {
             $issues.Add("간격 문단의 글자 크기 또는 줄높이가 계획과 다릅니다: $label")
+        }
+    }
+    elseif ([string]$action.action -eq 'InsertCalloutTable') {
+        if ([string]$record.observedText -ne [string]$action.text) {
+            $issues.Add("강조 상자 문자열이 구조화 블록과 정확히 일치하지 않습니다: $label")
+        }
+        if (-not [bool]$record.standaloneComponent -or -not [bool]$record.singleCellTable) {
+            $issues.Add("강조 상자는 독립된 1열 표 구성요소여야 합니다: $label")
+        }
+        if ([bool]$record.horizontalOverflow -or [int]$record.blankParagraphCountBefore -ne 0 -or
+            [int]$record.blankParagraphCountAfter -ne 0) {
+            $issues.Add("강조 상자 가로 넘침 또는 인접 빈 문단이 발견됐습니다: $label")
+        }
+        if ([string]$record.calloutKind -ne [string]$action.calloutKind -or
+            [string]$record.backgroundColor -ne [string]$action.formatting.backgroundColor -or
+            [string]$record.accentColor -ne [string]$action.formatting.accentColor -or
+            [int]$record.accentWidthPx -ne [int]$action.formatting.accentWidthPx -or
+            [string]$record.titleColor -ne [string]$action.formatting.titleColor) {
+            $issues.Add("강조 상자 종류·배경·왼쪽 바·제목색이 계획과 다릅니다: $label")
+        }
+    }
+    elseif ([string]$action.action -eq 'InsertImage') {
+        if ([string]$record.fileName -ne [string]$action.fileName -or
+            [string]$record.role -ne [string]$action.role) {
+            $issues.Add("이미지 파일명 또는 역할이 계획과 다릅니다: $label")
+        }
+        if (-not [bool]$record.standaloneComponent -or -not [bool]$record.naverHostedImage -or
+            [string]$record.alignment -ne [string]$action.formatting.alignment -or
+            [int]$record.displayWidthPx -ne [int]$action.formatting.displayWidthPx) {
+            $issues.Add("이미지 업로드·가운데 정렬·표시 폭이 계획과 다릅니다: $label")
         }
     }
     else {

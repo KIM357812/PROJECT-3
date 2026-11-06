@@ -198,9 +198,9 @@
       "RequireOfficialVerificationLinks": true,
       "JudgmentEvidenceLabels": ["확인된 사실", "주의할 표현", "운영자의 판단"],
       "Styles": [
-        { "Name": "배경·맥락", "BackgroundColor": "#f7f7f7", "AccentColor": "#777777", "TitleColor": "#555555", "TitleMarginBottomPx": 8, "OuterMarginTopPx": 30, "OuterMarginBottomPx": 20 },
-        { "Name": "육하원칙·핵심요약", "BackgroundColor": "#e3fdc8", "AccentColor": "#66a33b", "TitleColor": "#36851e", "TitleMarginBottomPx": 10, "OuterMarginTopPx": 30, "OuterMarginBottomPx": 20 },
-        { "Name": "운영자판단·결론", "BackgroundColor": "#ffe3c8", "AccentColor": "#ff9800", "TitleColor": "#b85c00", "TitleMarginBottomPx": 8, "OuterMarginTopPx": 30, "OuterMarginBottomPx": 20 }
+        { "Name": "육하원칙", "Kind": "FiveWOneH", "BackgroundColor": "#e3fdc8", "AccentColor": "#66a33b", "TitleColor": "#2f7d19", "TitleMarginBottomPx": 10, "OuterMarginTopPx": 30, "OuterMarginBottomPx": 20 },
+        { "Name": "핵심요약", "Kind": "KeySummary", "BackgroundColor": "#f7f7f7", "AccentColor": "#777777", "TitleColor": "#4d4d4d", "TitleMarginBottomPx": 8, "OuterMarginTopPx": 30, "OuterMarginBottomPx": 20 },
+        { "Name": "운영자판단", "Kind": "OperatorJudgment", "BackgroundColor": "#ffe3c8", "AccentColor": "#ff9800", "TitleColor": "#a84f00", "TitleMarginBottomPx": 8, "OuterMarginTopPx": 30, "OuterMarginBottomPx": 20 }
       ]
     },
     "ForbidHtmlTags": true,

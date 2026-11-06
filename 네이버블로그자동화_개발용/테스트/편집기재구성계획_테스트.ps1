@@ -16,6 +16,8 @@ try {
         editorBlocks = @(
             [pscustomobject]@{ id='p1'; type='BodyParagraph'; text='첫 번째 일반 문단' },
             [pscustomobject]@{ id='p2'; type='BodyParagraph'; text='두 번째 일반 문단' },
+            [pscustomobject]@{ id='c1'; type='Callout'; calloutKind='FiveWOneH'; text="육하원칙 한눈에 보기`n누가 : 실제 행동 주체" },
+            [pscustomobject]@{ id='i1'; type='Image'; text=''; fileName='01-대표.jpg'; role='대표'; altText='AI 데이터센터와 전력망' },
             [pscustomobject]@{ id='h1'; type='SectionHeading'; text='첫 번째 소제목' },
             [pscustomobject]@{ id='p3'; type='BodyParagraph'; text='소제목 아래 일반 문단' },
             [pscustomobject]@{ id='q1'; type='ReaderQuestion'; text='독자 질문입니다?' },
@@ -39,7 +41,7 @@ try {
         -not $created.executionGuards.rejectMergedLogicalBlocks -or
         -not $created.executionGuards.rejectMissingLogicalBlocks -or
         -not $created.executionGuards.stopBeforeSaveOnAnyMismatch -or
-        $actions.Count -ne 9 -or
+        $actions.Count -ne 11 -or
         $ordinary.Count -ne 2 -or $ordinary[0].expectedGapPx -ne 18 -or
         $ordinary[0].fontSizePx -ne 11 -or $ordinary[0].lineHeight -ne 1.6 -or
         -not $ordinary[0].precondition.requireEditorBodyFocus -or
@@ -47,6 +49,12 @@ try {
         @($actions | Where-Object { $_.blockType -eq 'SectionHeading' })[0].formatting.fontSizePx -ne 19 -or
         -not @($actions | Where-Object { $_.blockType -eq 'SectionHeading' })[0].postcondition.requireStandaloneParagraph -or
         @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].formatting.fontSizePx -ne 16 -or
+        @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].calloutKind -ne 'FiveWOneH' -or
+        @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.accentWidthPx -ne 4 -or
+        @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.backgroundColor -ne '#e3fdc8' -or
+        @($actions | Where-Object { $_.action -eq 'InsertImage' })[0].fileName -ne '01-대표.jpg' -or
+        @($actions | Where-Object { $_.action -eq 'InsertImage' })[0].formatting.displayWidthPx -ne 340 -or
+        @($actions | Where-Object { $_.action -eq 'InsertImage' })[0].formatting.alignment -ne 'center' -or
         $reference.Count -ne 1 -or $reference[0].expectedGapPx -ne 32 -or
         $reference[0].fontSizePx -ne 16 -or $reference[0].lineHeight -ne 2.0) {
         throw 'The complete-editor rebuild plan is incorrect.'
@@ -55,7 +63,7 @@ try {
     $sectionDraft = $draft | ConvertTo-Json -Depth 8 | ConvertFrom-Json
     $sectionDraft | Add-Member -NotePropertyName rebuildScope -NotePropertyValue 'NamedSection'
     $sectionDraft | Add-Member -NotePropertyName targetSectionHeading -NotePropertyValue '첫 번째 소제목'
-    $sectionDraft.editorBlocks = @($sectionDraft.editorBlocks[2..5])
+    $sectionDraft.editorBlocks = @($sectionDraft.editorBlocks[4..7])
     $sectionDraftPath = Join-Path $testRoot 'section-draft.json'
     $sectionPlanPath = Join-Path $testRoot 'section-plan.json'
     $sectionDraft | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $sectionDraftPath -Encoding UTF8
@@ -66,9 +74,9 @@ try {
     }
 
     $badDraft = $draft | ConvertTo-Json -Depth 8 | ConvertFrom-Json
-    $badDraft.editorBlocks = @($badDraft.editorBlocks[0..2]) + @(
+    $badDraft.editorBlocks = @($badDraft.editorBlocks[0..4]) + @(
         [pscustomobject]@{ id='spacer'; type='Spacer'; text='' },
-        $badDraft.editorBlocks[3], $badDraft.editorBlocks[4]
+        $badDraft.editorBlocks[5], $badDraft.editorBlocks[6]
     )
     $badDraft | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $badDraftPath -Encoding UTF8
     $badWasBlocked = $false

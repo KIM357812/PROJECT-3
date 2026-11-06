@@ -104,6 +104,7 @@ $plan = [pscustomobject]@{
         styles = @($settings.NaverDraft.CalloutDesign.Styles | ForEach-Object {
             [pscustomobject]@{
                 name = [string]$_.Name
+                kind = [string]$_.Kind
                 backgroundColor = [string]$_.BackgroundColor
                 accentColor = [string]$_.AccentColor
                 titleColor = [string]$_.TitleColor
@@ -112,7 +113,7 @@ $plan = [pscustomobject]@{
                 outerMarginBottomPx = [int]$_.OuterMarginBottomPx
             }
         })
-        usage = @('배경·맥락', '육하원칙·핵심요약', '운영자판단·결론')
+        usage = @('육하원칙', '핵심요약', '운영자판단')
     }
     tags = @($draft.tags)
     sources = @($draft.sources)
