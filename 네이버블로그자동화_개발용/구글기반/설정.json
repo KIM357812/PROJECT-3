@@ -1,0 +1,11 @@
+{
+  "CodexModel": "gpt-6.1-sol",
+  "MaximumCandidates": 16,
+  "MaximumCandidatesPerSite": 2,
+  "BlogUrl": "https://nexttechenergy.blogspot.com/",
+  "ExistingPostMaximum": 150,
+  "ImageMaximumPixels": 1600,
+  "ImageWebpQuality": 0.86,
+  "BackupOriginalImages": true,
+  "KeepFailedTemporaryFiles": true
+}

@@ -1,0 +1,71 @@
+{
+  "SchemaVersion": 1,
+  "Workflow": {
+    "Source": "구글기반",
+    "ReuseExistingNaverModules": [
+      "프로그램/이미지작업준비.ps1",
+      "프로그램/이미지최적화.ps1",
+      "프로그램/이미지검증.ps1"
+    ],
+    "StopPoint": "BeforePublicationSettings",
+    "OpenPublicationSettings": false,
+    "AllowPublicPublish": false,
+    "AllowPrivatePublish": false,
+    "ModifyExistingPosts": false
+  },
+  "Naver": {
+    "BlogUrl": "https://blog.naver.com/ij1128",
+    "WriteUrl": "https://blog.naver.com/ij1128?Redirect=Write&",
+    "DefaultCategory": "AI·데이터센터",
+    "MinimumTags": 5,
+    "MaximumTags": 10,
+    "OfficialRules": {
+      "RequireUsefulOriginalAnalysis": true,
+      "ForbidKeywordStuffing": true,
+      "ForbidHiddenKeywords": true,
+      "ForbidMechanicalMassPublishing": true,
+      "RequireExternalLinkPurpose": true,
+      "RequireCompensationDisclosureWhenApplicable": true,
+      "SearchRankingNotGuaranteed": true,
+      "DoNotEnforceUnofficialLengthOrImageCounts": true
+    }
+  },
+  "ImageAutomation": {
+    "Enabled": true,
+    "TargetCount": 4,
+    "Width": 1200,
+    "Height": 800,
+    "EditorDisplayWidth": 400,
+    "EditorAlignment": "center",
+    "AspectRatio": "3:2",
+    "OutputFormat": "JPEG",
+    "InitialJpegQuality": 84,
+    "MinimumJpegQuality": 68,
+    "MaximumKilobytes": 450,
+    "RequireCentralSquareSafeArea": true,
+    "ForbidEmbeddedText": true,
+    "ForbidLogosAndWatermarks": true,
+    "Roles": [
+      { "Order": 1, "Name": "대표", "OriginalBaseName": "01-대표", "OutputFileName": "01-대표.jpg", "Placement": "도입부", "Purpose": "주제를 한눈에 전달" },
+      { "Order": 2, "Name": "현황", "OriginalBaseName": "02-현황", "OutputFileName": "02-현황.jpg", "Placement": "현황과 배경", "Purpose": "핵심 현황을 시각화" },
+      { "Order": 3, "Name": "구조", "OriginalBaseName": "03-구조", "OutputFileName": "03-구조.jpg", "Placement": "기술과 시스템 분석", "Purpose": "기술·비용·정책 연결을 설명" },
+      { "Order": 4, "Name": "전망", "OriginalBaseName": "04-전망", "OutputFileName": "04-전망.jpg", "Placement": "결론과 전망", "Purpose": "국내 영향과 향후 쟁점을 전달" }
+    ]
+  },
+  "EditorFormatting": {
+    "BodyFontSizePx": 15,
+    "BodyLineHeightPx": 27,
+    "ParagraphBottomPx": 18,
+    "SectionHeadingFontSizePx": 19,
+    "SubheadingFontSizePx": 17,
+    "SectionHeadingTopPx": 32,
+    "SectionHeadingBottomPx": 21,
+    "CalloutTitleFontSizePx": 15,
+    "CalloutLineHeightPx": 24,
+    "CalloutTitleBottomPx": 18,
+    "CalloutParagraphBottomPx": 18,
+    "ReferenceTopPx": 32,
+    "UseHeadingDivider": false,
+    "ReferenceLabel": "참고자료 :"
+  }
+}

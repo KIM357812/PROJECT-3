@@ -8,6 +8,8 @@ $integrityManifest = Join-Path $projectRoot '보호기준\google-reference-integ
 & $integrityValidator -Mode Verify -ManifestPath $integrityManifest
 $testFiles = @(
     '개발범위_테스트.ps1',
+    '구글기반_네이버패키지_테스트.ps1',
+    '구글기반_새글생성_정적테스트.ps1',
     '구글참조무결성검증_테스트.ps1',
     '요구사항대조_테스트.ps1',
     '백업내보내기_테스트.ps1',

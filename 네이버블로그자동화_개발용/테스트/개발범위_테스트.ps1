@@ -121,8 +121,12 @@ foreach ($text in $requiredIntroductionText) {
     }
 }
 
+$googleBaseRoot = Join-Path $projectRoot '구글기반'
 $projectTextFiles = Get-ChildItem -LiteralPath $projectRoot -Recurse -File |
-    Where-Object { $_.Extension -eq '.md' -or $_.Extension -eq '.ps1' }
+    Where-Object {
+        ($_.Extension -eq '.md' -or $_.Extension -eq '.ps1') -and
+        -not $_.FullName.StartsWith($googleBaseRoot, [System.StringComparison]::OrdinalIgnoreCase)
+    }
 $forbiddenPhrases = @(
     ('30' + [char]0xB144),
     ('25' + [char]0xB144),

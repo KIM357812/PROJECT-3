@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $launcherPath = Join-Path $projectRoot '프로그램\네이버자동화.ps1'
-$settingsPath = Join-Path $projectRoot '설정.json'
+$settingsPath = Join-Path $projectRoot '네이버통합설정.json'
 
 foreach ($requiredPath in @($launcherPath, $settingsPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
@@ -29,7 +29,7 @@ if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
 
 if ($PSCmdlet.ParameterSetName -eq 'SelfTest') {
     $selfTestResult = & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File $launcherPath -SelfTest
-    if ($selfTestResult -notcontains 'Naver automation UI self-test passed.') {
+    if ($selfTestResult -notcontains 'Naver integrated automation self-test passed.') {
         throw '네이버 자동화 화면 자체 검사를 통과하지 못했습니다.'
     }
     Write-Output 'Naver automation installer self-test passed.'
