@@ -187,6 +187,7 @@ for ($i = 0; $i -lt $blocks.Count; $i++) {
             backgroundColor=[string]$style.BackgroundColor
             accentColor=[string]$style.AccentColor
             accentWidthPx=[int]$rules.CalloutDesign.LeftAccentWidthPx
+            nativeAccentCellWidthPx=[int]$rules.CalloutDesign.NativeAccentCellWidthPx
             titleColor=[string]$style.TitleColor
             titleFontSizePx=[int]$rules.CalloutDesign.TitleFontSizePx
             titleFontWeight=[int]$rules.CalloutDesign.TitleFontWeight
@@ -201,7 +202,7 @@ for ($i = 0; $i -lt $blocks.Count; $i++) {
             borderRadiusPx=[int]$rules.CalloutDesign.BorderRadiusPx
             forbidAdjacentBlankParagraphs=[bool]$rules.CalloutDesign.ForbidAdjacentBlankParagraphs
         })
-        $insertAction.postcondition | Add-Member -NotePropertyName requireSingleCellTable -NotePropertyValue $true
+        $insertAction.postcondition | Add-Member -NotePropertyName requireTwoCellAccentTable -NotePropertyValue $true
         $insertAction.postcondition | Add-Member -NotePropertyName requireNoHorizontalOverflow -NotePropertyValue $true
         $insertAction.postcondition | Add-Member -NotePropertyName requireZeroAdjacentBlankParagraphs -NotePropertyValue $true
     }

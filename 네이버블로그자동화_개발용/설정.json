@@ -164,7 +164,7 @@
     "RequireFiveWOneHSummary": true,
     "CalloutDesign": {
       "Enabled": true,
-      "RenderMode": "ResponsiveSingleCellBorderTable",
+      "RenderMode": "ResponsiveTwoCellAccentTable",
       "DefaultCount": 3,
       "MaximumCount": 4,
       "FourthBlockMinimumBodyChars": 2600,
@@ -176,6 +176,7 @@
       "BorderRadiusPx": 4,
       "LeftAccentEnabled": true,
       "LeftAccentWidthPx": 4,
+      "NativeAccentCellWidthPx": 20,
       "TitleFontSizePx": 15,
       "TitleFontWeight": 700,
       "TitleMarginBottomPx": 8,

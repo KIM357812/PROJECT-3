@@ -82,8 +82,8 @@ for ($i = 0; $i -lt $limit; $i++) {
         if ([string]$record.observedText -ne [string]$action.text) {
             $issues.Add("강조 상자 문자열이 구조화 블록과 정확히 일치하지 않습니다: $label")
         }
-        if (-not [bool]$record.standaloneComponent -or -not [bool]$record.singleCellTable) {
-            $issues.Add("강조 상자는 독립된 1열 표 구성요소여야 합니다: $label")
+        if (-not [bool]$record.standaloneComponent -or -not [bool]$record.twoCellAccentTable) {
+            $issues.Add("강조 상자는 왼쪽 장식 셀과 본문 셀로 구성된 독립 표여야 합니다: $label")
         }
         if ([bool]$record.horizontalOverflow -or [int]$record.blankParagraphCountBefore -ne 0 -or
             [int]$record.blankParagraphCountAfter -ne 0) {
@@ -93,6 +93,7 @@ for ($i = 0; $i -lt $limit; $i++) {
             [string]$record.backgroundColor -ne [string]$action.formatting.backgroundColor -or
             [string]$record.accentColor -ne [string]$action.formatting.accentColor -or
             [int]$record.accentWidthPx -ne [int]$action.formatting.accentWidthPx -or
+            [int]$record.nativeAccentCellWidthPx -ne [int]$action.formatting.nativeAccentCellWidthPx -or
             [string]$record.titleColor -ne [string]$action.formatting.titleColor) {
             $issues.Add("강조 상자 종류·배경·왼쪽 바·제목색이 계획과 다릅니다: $label")
         }

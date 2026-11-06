@@ -103,13 +103,14 @@ try {
         -not $plan.sectionFormatting.forbidSpacingBlankParagraphs -or
         -not $plan.sectionFormatting.dividerEnabled -or
         $plan.sectionFormatting.dividerThicknessPx -ne 2 -or
-        $plan.calloutFormatting.renderMode -ne 'ResponsiveSingleCellBorderTable' -or
+        $plan.calloutFormatting.renderMode -ne 'ResponsiveTwoCellAccentTable' -or
         $plan.calloutFormatting.defaultCount -ne 3 -or
         $plan.calloutFormatting.maximumCount -ne 4 -or
         $plan.calloutFormatting.fourthBlockMinimumBodyChars -ne 2600 -or
         $plan.calloutFormatting.fourthBlockUse -ne '국내영향·향후확인' -or
         -not $plan.calloutFormatting.leftAccentEnabled -or
         $plan.calloutFormatting.leftAccentWidthPx -ne 4 -or
+        $plan.calloutFormatting.nativeAccentCellWidthPx -ne 20 -or
         $plan.calloutFormatting.innerPaddingVerticalPx -ne 16 -or
         $plan.calloutFormatting.innerPaddingHorizontalPx -ne 18 -or
         $plan.calloutFormatting.outerMarginTopPx -ne 30 -or

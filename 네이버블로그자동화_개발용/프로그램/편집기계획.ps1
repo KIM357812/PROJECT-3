@@ -86,6 +86,7 @@ $plan = [pscustomobject]@{
         borderRadiusPx = [int]$settings.NaverDraft.CalloutDesign.BorderRadiusPx
         leftAccentEnabled = [bool]$settings.NaverDraft.CalloutDesign.LeftAccentEnabled
         leftAccentWidthPx = [int]$settings.NaverDraft.CalloutDesign.LeftAccentWidthPx
+        nativeAccentCellWidthPx = [int]$settings.NaverDraft.CalloutDesign.NativeAccentCellWidthPx
         titleFontSizePx = [int]$settings.NaverDraft.CalloutDesign.TitleFontSizePx
         titleFontWeight = [int]$settings.NaverDraft.CalloutDesign.TitleFontWeight
         titleMarginBottomPx = [int]$settings.NaverDraft.CalloutDesign.TitleMarginBottomPx

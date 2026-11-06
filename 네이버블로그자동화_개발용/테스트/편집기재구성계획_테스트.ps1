@@ -51,6 +51,8 @@ try {
         @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].formatting.fontSizePx -ne 16 -or
         @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].calloutKind -ne 'FiveWOneH' -or
         @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.accentWidthPx -ne 4 -or
+        @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.nativeAccentCellWidthPx -ne 20 -or
+        -not @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].postcondition.requireTwoCellAccentTable -or
         @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.backgroundColor -ne '#e3fdc8' -or
         @($actions | Where-Object { $_.action -eq 'InsertImage' })[0].fileName -ne '01-대표.jpg' -or
         @($actions | Where-Object { $_.action -eq 'InsertImage' })[0].formatting.displayWidthPx -ne 340 -or
