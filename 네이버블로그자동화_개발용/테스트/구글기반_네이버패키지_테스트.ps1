@@ -30,8 +30,16 @@ try {
     Assert-True ($result.stopPoint -eq 'BeforePublicationSettings') '발행 설정 전 정지'
 
     $plan = Get-Content -LiteralPath $result.editorPlan -Raw -Encoding UTF8 | ConvertFrom-Json
+    $contract = Get-Content -LiteralPath $result.executionContract -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True (@($plan.actions | Where-Object type -eq 'UploadImage').Count -eq 4) '이미지 삽입 동작 4개'
     Assert-True (@($plan.actions | Where-Object type -match 'Publish|Save').Count -eq 0) '공개·비공개 발행 동작 없음'
+    Assert-True ($result.executionStatus -eq 'NotExecuted' -and -not [bool]$result.completionClaimAllowed) '실행 전 패키지를 완료로 표시하지 않음'
+    Assert-True ($contract.executionMode -eq 'ComputerUseNewPostOnly') '컴퓨터 사용 새 글 전용 실행 계약'
+    Assert-True ([bool]$contract.guards.existingPostModificationForbidden) '기존 글 수정 금지 실행 가드'
+    Assert-True ([bool]$contract.guards.publicationSettingsForbidden -and [bool]$contract.guards.publicOrPrivatePublishForbidden) '발행 설정·게시 금지 실행 가드'
+    Assert-True (@($contract.steps).Count -eq @($plan.actions).Count) '편집 계획 전체 동작이 실행 계약에 연결됨'
+    Assert-True (@($contract.steps | Where-Object { -not $_.postcondition.stopImmediatelyOnMismatch }).Count -eq 0) '동작 불일치 즉시 중단'
+    Assert-True (@($contract.steps | Where-Object { $_.action -eq 'InsertStandaloneHeading' -and -not $_.postcondition.requireIndependentEditorComponent }).Count -eq 0) '소제목 독립 구성요소 실행 조건'
     Assert-True (@($plan.reusedExistingNaverFeatures).Count -eq 3) '기존 네이버 이미지 기능만 재사용'
     Assert-True (@($plan.actions | Where-Object type -eq 'PasteRenderedSegment').Count -eq 0) '여러 제목·본문을 한 번에 붙여 넣는 구간 동작 금지'
     $headingActions = @($plan.actions | Where-Object type -eq 'InsertStandaloneHeading')

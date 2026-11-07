@@ -241,6 +241,51 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
     if ($headingCount -eq 0) { throw '네이버 편집 계획에 독립 소제목이 없습니다.' }
 }
 
+function New-ComputerUseExecutionContract([object]$Plan) {
+    $supportedTypes = @(
+        'OpenNewPost','SetTitle','InsertVerticalSpacer','InsertStandaloneHeading',
+        'PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','UploadImage',
+        'SetTags','StopBeforePublicationSettings'
+    )
+    $steps = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($action in @($Plan.actions | Sort-Object order)) {
+        if ($supportedTypes -notcontains [string]$action.type) {
+            throw "컴퓨터 사용 실행기가 지원하지 않는 편집 동작입니다: $($action.type)"
+        }
+        $steps.Add([pscustomobject]@{
+            stepId = ('step-{0:D3}' -f [int]$action.order)
+            action = [string]$action.type
+            payload = $action
+            precondition = [pscustomobject]@{
+                requireNewPostEditor = $true
+                forbidExistingPostEdit = $true
+                requireEditorBodyFocus = (@('InsertVerticalSpacer','InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','UploadImage') -contains [string]$action.type)
+            }
+            postcondition = [pscustomobject]@{
+                requireActionSuccess = $true
+                requireIndependentEditorComponent = (@('InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock') -contains [string]$action.type)
+                requireMeasuredSpacing = ([string]$action.type -eq 'InsertVerticalSpacer')
+                stopImmediatelyOnMismatch = $true
+            }
+        })
+    }
+    return [pscustomobject]@{
+        schemaVersion = 1
+        contentId = [string]$Plan.contentId
+        executionMode = 'ComputerUseNewPostOnly'
+        executionStatus = 'NotExecuted'
+        completionClaimAllowed = $false
+        guards = [pscustomobject]@{
+            existingPostModificationForbidden = $true
+            publicationSettingsForbidden = $true
+            publicOrPrivatePublishForbidden = $true
+            requireActionByActionObservation = $true
+            requirePcAndMobileResultValidation = $true
+        }
+        steps = @($steps.ToArray())
+    }
+}
+
 function New-SegmentFiles([string]$Html, [string]$Directory, [object]$Formatting) {
     $wrapperPattern = '(?is)<div\b(?=[^>]*\bdata-blog-image-wrap\s*=\s*["'']true["''])[^>]*>\s*<img\b[^>]*>\s*</div>'
     $matches = @([regex]::Matches($Html, $wrapperPattern))
@@ -369,6 +414,9 @@ $plan = [pscustomobject]@{
     privatePublishPerformed = $false
 }
 $plan | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $planPath -Encoding UTF8
+$executionContractPath = Join-Path $outputRoot '네이버편집실행계약.json'
+$executionContract = New-ComputerUseExecutionContract -Plan $plan
+$executionContract | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $executionContractPath -Encoding UTF8
 
 foreach ($name in $requiredFiles) {
     $after = Get-FileFingerprint (Join-Path $sourceFull $name)
@@ -383,6 +431,9 @@ foreach ($name in $requiredFiles) {
     draft = $draftPath
     imageManifest = $imageManifestPath
     editorPlan = $planPath
+    executionContract = $executionContractPath
+    executionStatus = 'NotExecuted'
+    completionClaimAllowed = $false
     title = [string]$job.RecommendedTitle
     tagCount = $tags.Count
     segmentCount = $segments.Count

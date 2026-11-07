@@ -136,14 +136,14 @@ $convertButton.Add_Click({
     try {
         if ([string]::IsNullOrWhiteSpace($sourceText.Text)) { throw 'Google 완성 글 폴더를 선택하세요.' }
         $output = & $packagePath -SourceArticlePath $sourceText.Text -WorkRoot $workText.Text | ConvertFrom-Json
-        $result.Text = "네이버 편집 패키지를 만들었습니다.`r`n제목: $($output.title)`r`n이미지: $($output.imageCount)장`r`n입력 구간: $($output.segmentCount)개`r`n편집 계획: $($output.editorPlan)`r`n`r`n발행 설정은 열지 않습니다."
+        $result.Text = "네이버 편집 패키지를 만들었습니다.`r`n제목: $($output.title)`r`n이미지: $($output.imageCount)장`r`n입력 구간: $($output.segmentCount)개`r`n편집 계획: $($output.editorPlan)`r`n컴퓨터 사용 실행 계약: $($output.executionContract)`r`n실행 상태: 실행 전(완료 아님)`r`n`r`n기존 글과 발행 설정은 건드리지 않습니다."
     } catch { Show-Error $_.Exception.Message }
 })
 $generateButton.Add_Click({
     try {
         $result.Text='Google 기반 기사 수집·선정·사실검증·글 생성을 실행하고 있습니다.';$form.Refresh()
         $output = & $newArticlePath -WorkRoot $workText.Text | ConvertFrom-Json
-        $result.Text = "새 네이버 편집 패키지를 만들었습니다.`r`n제목: $($output.title)`r`n이미지: $($output.imageCount)장`r`n편집 계획: $($output.editorPlan)`r`n`r`n이미지 생성·최적화 후 네이버 새 글 편집기에 입력합니다."
+        $result.Text = "새 네이버 편집 패키지를 만들었습니다.`r`n제목: $($output.title)`r`n이미지: $($output.imageCount)장`r`n편집 계획: $($output.editorPlan)`r`n컴퓨터 사용 실행 계약: $($output.executionContract)`r`n실행 상태: 실행 전(완료 아님)`r`n`r`n원자 동작 실행과 PC·모바일 검증 후에만 완료로 판정합니다."
     } catch { Show-Error $_.Exception.Message }
 })
 
