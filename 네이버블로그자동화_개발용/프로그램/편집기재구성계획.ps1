@@ -165,6 +165,7 @@ for ($i = 0; $i -lt $blocks.Count; $i++) {
     }
     if ([string]$block.type -eq 'SectionHeading') {
         $insertAction | Add-Member -NotePropertyName formatting -NotePropertyValue ([pscustomobject]@{
+            fontFamily=[string]$rules.HeadingFontFamily
             fontSizePx=[int]$rules.SectionHeadingFontSize
             bold=[bool]$rules.SectionHeadingBold
             marginTopPx=[int]$rules.SectionHeadingMarginTopPx
@@ -174,9 +175,16 @@ for ($i = 0; $i -lt $blocks.Count; $i++) {
     }
     elseif (@('BodyParagraph', 'ReaderQuestion', 'ReferenceLine') -contains [string]$block.type) {
         $insertAction | Add-Member -NotePropertyName formatting -NotePropertyValue ([pscustomobject]@{
+            fontFamily=[string]$rules.BodyFontFamily
             fontSizePx=[int]$rules.BodyFontSize
             lineHeight=[double]$rules.BodyLineHeight
+            lineHeightPx=[int]$rules.BodyLineHeightPx
+            alignment=[string]$rules.BodyTextAlignment
+            lastLineAlignment=[string]$rules.BodyLastLineAlignment
         })
+        $insertAction.postcondition | Add-Member -NotePropertyName requireNativeFontFamily -NotePropertyValue ([string]$rules.BodyFontFamily)
+        $insertAction.postcondition | Add-Member -NotePropertyName requireRightEdgeAlignment -NotePropertyValue $true
+        $insertAction.postcondition | Add-Member -NotePropertyName requireLastLineLeft -NotePropertyValue $true
     }
     elseif ([string]$block.type -eq 'Callout') {
         $insertAction.action = 'InsertCalloutTable'

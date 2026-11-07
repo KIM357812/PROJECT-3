@@ -72,15 +72,15 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     })
     $result = [regex]::Replace($result, '(?is)<h3\b[^>]*>(?<text>.*?)</h3>', {
         param($match)
-        '<div data-naver-role="subheading" style="width:100%;margin:28px 0 18px 0;box-sizing:border-box;"><p style="margin:0;font-size:{0}px;line-height:27px;font-weight:700;color:#222;text-align:left;word-break:keep-all;">{1}</p></div>' -f
+        '<div data-naver-role="subheading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;color:#222;text-align:left;word-break:keep-all;">{3}</p></div>' -f
+            [int]$Formatting.SectionHeadingTopPx,
+            [int]$Formatting.SectionHeadingBottomPx,
             [int]$Formatting.SubheadingFontSizePx,
             $match.Groups['text'].Value
     })
     $result = [regex]::Replace($result, '(?i)font-size\s*:\s*16px', ('font-size:{0}px' -f [int]$Formatting.BodyFontSizePx))
     $result = [regex]::Replace($result, '(?i)line-height\s*:\s*1\.75', ('line-height:{0}px' -f [int]$Formatting.BodyLineHeightPx))
     $result = [regex]::Replace($result, '(?i)line-height\s*:\s*1\.6', ('line-height:{0}px' -f [int]$Formatting.CalloutLineHeightPx))
-    $result = [regex]::Replace($result, '(?i)text-align\s*:\s*justify', 'text-align:left')
-    $result = [regex]::Replace($result, '(?i)text-align-last\s*:\s*left\s*;?', '')
     $result = [regex]::Replace($result, '(?i)margin\s*:\s*0\s+0\s+18px\s+0', ('margin:0 0 {0}px 0' -f [int]$Formatting.ParagraphBottomPx))
     $result = [regex]::Replace($result, '(?i)margin\s*:\s*0\s+0\s+(?:8|15)px\s+0(?=[;"''])', ('margin:0 0 {0}px 0' -f [int]$Formatting.CalloutTitleBottomPx))
     $result = [regex]::Replace($result, '(?i)margin-bottom\s*:\s*10px', ('margin-bottom:{0}px' -f [int]$Formatting.CalloutParagraphBottomPx))
@@ -96,7 +96,6 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
 function Assert-NaverSegment([string]$Fragment, [int]$Index) {
     if ($Fragment -match '(?is)<h[23]\b') { throw "네이버 구간 $Index 에 변환되지 않은 소제목이 있습니다." }
     if ($Fragment -match '(?i)>\s*출처\s*:\s*<') { throw "네이버 구간 $Index 의 참고자료 표기가 변환되지 않았습니다." }
-    if ($Fragment -match '(?i)text-align\s*:\s*justify') { throw "네이버 구간 $Index 에 모바일 자간을 벌리는 양쪽 정렬이 남아 있습니다." }
 }
 
 function ConvertFrom-HtmlText([string]$Html) {
@@ -168,8 +167,9 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             })
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertStandaloneHeading'; level=($(if ($role -eq 'section-heading') { 2 } else { 3 }))
-                text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontSizePx=$fontSize; bold=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx
-                postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true }
+                text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
+                fontSizePx=$fontSize; bold=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
+                postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
             })
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'
@@ -178,15 +178,37 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             })
             continue
         }
+        $type = if ($block -match '(?is)^<p\b') { 'PasteStandaloneParagraphBlock' } else { 'PasteRenderedAtomicBlock' }
+        $isCallout = ($block -match '(?is)(?:data-blog-six-facts|background(?:-color)?\s*:)')
+        if ($type -eq 'PasteStandaloneParagraphBlock') {
+            $block = [regex]::Replace($block, '(?i)text-align\s*:\s*(?:left|justify)(?:\s*;\s*text-align-last\s*:\s*left)?', 'text-align:justify;text-align-last:left')
+        }
         $BlockSequence.Value++
         $path = Write-NaverBlockFile -Block $block -Directory $BlockDirectory -Sequence $BlockSequence.Value
-        $type = if ($block -match '(?is)^<p\b') { 'PasteStandaloneParagraphBlock' } else { 'PasteRenderedAtomicBlock' }
         $Actions.Add([pscustomobject]@{
             order=$Order.Value++; type=$type; path=$path
+            formatting=[pscustomobject]@{
+                fontFamily=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.BodyFontFamily } else { $null })
+                fontSizePx=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [int]$Formatting.BodyFontSizePx } else { $null })
+                lineHeightPx=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [int]$Formatting.BodyLineHeightPx } else { $null })
+                alignment=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.TextAlignment } else { $null })
+                lastLineAlignment=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.LastLineAlignment } else { $null })
+                applyWithNativeToolbar=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [bool]$Formatting.RequireNativeFontApplication } else { $false })
+                applyToCalloutBody=$isCallout
+                calloutBodyFontFamily=$(if ($isCallout) { [string]$Formatting.BodyFontFamily } else { $null })
+                calloutBodyAlignment=$(if ($isCallout) { [string]$Formatting.TextAlignment } else { $null })
+                calloutLastLineAlignment=$(if ($isCallout) { [string]$Formatting.LastLineAlignment } else { $null })
+                preserveCalloutTitleLeft=$isCallout
+            }
             postcondition=[pscustomobject]@{
                 requireSingleTopLevelBlock=$true
                 requireStandaloneParagraph=($type -eq 'PasteStandaloneParagraphBlock')
                 paragraphBottomPx=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [int]$Formatting.ParagraphBottomPx } else { $null })
+                requireNativeFontFamily=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.BodyFontFamily } else { $null })
+                requireRightEdgeAlignment=($type -eq 'PasteStandaloneParagraphBlock')
+                requireLastLineLeft=($type -eq 'PasteStandaloneParagraphBlock')
+                requireCalloutBodyRightEdgeAlignment=$isCallout
+                requireCalloutNativeFont=$isCallout
             }
         })
     }
@@ -226,8 +248,12 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
         if ([string]$action.type -eq 'PasteStandaloneParagraphBlock') {
             if (-not [bool]$action.postcondition.requireSingleTopLevelBlock -or
                 -not [bool]$action.postcondition.requireStandaloneParagraph -or
-                [int]$action.postcondition.paragraphBottomPx -ne [int]$Formatting.ParagraphBottomPx) {
-                throw '일반 문단의 독립 블록 또는 문단 뒤 18px 사후조건이 올바르지 않습니다.'
+                [int]$action.postcondition.paragraphBottomPx -ne [int]$Formatting.ParagraphBottomPx -or
+                [string]$action.formatting.fontFamily -ne [string]$Formatting.BodyFontFamily -or
+                [string]$action.formatting.alignment -ne 'justify' -or
+                -not [bool]$action.postcondition.requireRightEdgeAlignment -or
+                -not [bool]$action.postcondition.requireLastLineLeft) {
+                throw '일반 문단의 독립 블록·글꼴·양쪽 정렬 또는 문단 뒤 18px 사후조건이 올바르지 않습니다.'
             }
         }
 
@@ -235,6 +261,12 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
             $blockHtml = [IO.File]::ReadAllText([string]$action.path, [Text.Encoding]::UTF8)
             if ($blockHtml -match 'data-naver-role="(?:section-heading|subheading)"') {
                 throw '본문 원자 블록 안에 소제목이 포함되어 있습니다.'
+            }
+            if ([bool]$action.formatting.applyToCalloutBody -and
+                ([string]$action.formatting.calloutBodyFontFamily -ne [string]$Formatting.BodyFontFamily -or
+                 [string]$action.formatting.calloutBodyAlignment -ne 'justify' -or
+                 -not [bool]$action.postcondition.requireCalloutBodyRightEdgeAlignment)) {
+                throw '강조 상자 본문의 기본서체 또는 양쪽 정렬 실행 조건이 올바르지 않습니다.'
             }
         }
     }
@@ -265,6 +297,8 @@ function New-ComputerUseExecutionContract([object]$Plan) {
                 requireActionSuccess = $true
                 requireIndependentEditorComponent = (@('InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock') -contains [string]$action.type)
                 requireMeasuredSpacing = ([string]$action.type -eq 'InsertVerticalSpacer')
+                requireNativeFontVerification = ((@('InsertStandaloneHeading','PasteStandaloneParagraphBlock') -contains [string]$action.type) -or [bool]$action.formatting.applyToCalloutBody)
+                requireRightEdgeAlignmentVerification = (([string]$action.type -eq 'PasteStandaloneParagraphBlock') -or [bool]$action.formatting.applyToCalloutBody)
                 stopImmediatelyOnMismatch = $true
             }
         })

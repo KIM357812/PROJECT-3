@@ -35,7 +35,11 @@ $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | Convert
 if ($settings.NaverDraft.PostTitleFontSize -ne 26 -or
     $settings.NaverDraft.PostTitleMobileFontSize -ne 24 -or
     $settings.NaverDraft.SectionHeadingFontSize -ne 19 -or
-    $settings.NaverDraft.BodyFontSize -ne 16 -or
+    $settings.NaverDraft.BodyFontSize -ne 15 -or
+    $settings.NaverDraft.BodyFontFamily -ne '기본서체' -or
+    $settings.NaverDraft.BodyTextAlignment -ne 'justify' -or
+    $settings.NaverDraft.SectionHeadingMarginTopPx -ne 32 -or
+    $settings.NaverDraft.SectionHeadingMarginBottomPx -ne 21 -or
     $settings.ImageAutomation.EditorDisplayWidth -ne 340) {
     throw 'The verified Naver title, heading, body, or image display defaults changed unexpectedly.'
 }

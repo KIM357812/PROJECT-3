@@ -53,6 +53,11 @@
     ]
   },
   "EditorFormatting": {
+    "BodyFontFamily": "기본서체",
+    "HeadingFontFamily": "기본서체",
+    "TextAlignment": "justify",
+    "LastLineAlignment": "left",
+    "RequireNativeFontApplication": true,
     "BodyFontSizePx": 15,
     "BodyLineHeightPx": 27,
     "ParagraphBottomPx": 18,

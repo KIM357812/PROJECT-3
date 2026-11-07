@@ -46,7 +46,11 @@ $plan = [pscustomobject]@{
         titleMobileFontSize = [int]$settings.NaverDraft.PostTitleMobileFontSize
         bold = [bool]$settings.NaverDraft.SectionHeadingBold
         headingFontSize = [int]$settings.NaverDraft.SectionHeadingFontSize
+        headingFontFamily = [string]$settings.NaverDraft.HeadingFontFamily
         bodyFontSize = [int]$settings.NaverDraft.BodyFontSize
+        bodyFontFamily = [string]$settings.NaverDraft.BodyFontFamily
+        bodyTextAlignment = [string]$settings.NaverDraft.BodyTextAlignment
+        bodyLastLineAlignment = [string]$settings.NaverDraft.BodyLastLineAlignment
         bodyLineHeight = [double]$settings.NaverDraft.BodyLineHeight
         bodyLineHeightPx = [int]$settings.NaverDraft.BodyLineHeightPx
         paragraphMarginBottomPx = [int]$settings.NaverDraft.ParagraphMarginBottomPx
@@ -57,7 +61,7 @@ $plan = [pscustomobject]@{
         dividerThicknessPx = [int]$settings.NaverDraft.SectionHeadingDividerThicknessPx
         blankLineBeforeAndAfter = $false
         forbidSpacingBlankParagraphs = $true
-        mobilePurpose = '네이버 편집기 지원값에 맞춰 소제목 19px·위 35px·아래 15px, 일반 본문 16px·줄높이 1.75(28px), 일반 문단 사이 실제 18px를 적용해 PC와 모바일에서 소속 관계를 빠르게 파악하게 한다.'
+        mobilePurpose = '네이버 기본서체로 소제목 19px·위 32px·아래 21px, 일반 본문 15px·줄높이 27px·양쪽 정렬·마지막 줄 왼쪽 정렬, 일반 문단 사이 18px을 적용한다.'
     }
     paragraphGapFormatting = [pscustomobject]@{
         mode = [string]$settings.NaverDraft.ParagraphGapDesign.Mode
@@ -194,7 +198,7 @@ $plan = [pscustomobject]@{
     verificationSteps = @(
         'mainFrame과 제목·본문 컴포넌트 각각 한 개 확인',
         '제목과 본문 입력 후 실제 문자열 재확인',
-        '제목을 PC 26pt·모바일 24pt로 확인하고 모든 소제목을 굵게·19px·하단 구분선으로 적용한 뒤 일반 본문 16px·줄높이 1.75(28px), 소제목 위 35px·아래 15px, 일반 문단 뒤 18px를 빈 문단 없이 적용했는지 확인',
+        '제목을 PC 26px·모바일 24px로 확인하고 모든 소제목을 기본서체·굵게·19px·위 32px·아래 21px의 독립 구성요소로 적용한 뒤 일반 본문을 기본서체·15px·줄높이 27px·양쪽 정렬·마지막 줄 왼쪽 정렬·문단 뒤 18px으로 적용했는지 확인',
         '연속된 일반 본문 문단 사이에만 네이버 지원값 11px·줄높이 1.6의 간격 문단 1개로 화면상 18px(렌더링 17.6px, 허용 오차 0.5px)을 만들고, 소제목·강조 상자 앞뒤에는 간격 문단을 넣지 않았는지 PC·모바일 렌더링에서 모든 문단 쌍을 측정',
         '완결된 도입부→육하원칙→연결 문장→핵심요약→첫 소제목 순서를 확인하고 육하원칙 여섯 값이 선정 기사 기반 articleFiveWOneH와 정확히 일치하며 출처 URL도 첫 번째 기사 URL과 같은지 확인',
         '육하원칙은 완성 본문을 다시 요약하지 않고 실제 주체·사건일·장소·방식·이유를 선정 기사에서 추출했는지, 기사에 없는 항목을 확인되지 않음으로 남겼는지 확인',

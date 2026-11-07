@@ -18,8 +18,9 @@ try {
         registerAsNotice=$false
         sectionHeadings=@('첫 소제목')
         sectionFormatting=[pscustomobject]@{
-            headingFontSize=19; bodyFontSize=16; bodyLineHeight=1.75; bodyLineHeightPx=28
-            paragraphMarginBottomPx=18; headingMarginTopPx=35; headingMarginBottomPx=15
+            headingFontSize=19; headingFontFamily='기본서체'; bodyFontSize=15; bodyFontFamily='기본서체'
+            bodyTextAlignment='justify'; bodyLastLineAlignment='left'; bodyLineHeight=1.8; bodyLineHeightPx=27
+            paragraphMarginBottomPx=18; headingMarginTopPx=32; headingMarginBottomPx=21
         }
         paragraphGapFormatting=[pscustomobject]@{
             mode='SingleSizedSpacerParagraph'; gapPx=18; gapTolerancePx=0.5; spacerParagraphCount=1
@@ -66,7 +67,7 @@ try {
         imageOrderVerified=$true; imageServerUploadVerified=$true
         pcLayoutVerified=$true; mobileLayoutVerified=$false
         layoutMeasurementSource='RenderedNaverDomAndScreen'
-        bodyFontSizePx=16; bodyLineHeightPx=28; paragraphMarginBottomPx=18
+        bodyFontSizePx=15; bodyFontFamily='기본서체'; bodyTextAlignment='justify'; bodyLastLineAlignment='left'; bodyLineHeightPx=27; paragraphMarginBottomPx=18
         bodyParagraphPairCount=1
         paragraphGapLayouts=@(
             [pscustomobject]@{
@@ -82,15 +83,15 @@ try {
         headingLayouts=@(
             [pscustomobject]@{
                 text='첫 소제목'; standaloneParagraph=$true; fontSizePx=19
-                marginTopPx=35; marginBottomPx=15
+                marginTopPx=32; marginBottomPx=21
             }
         )
         calloutLayouts=@(
-            [pscustomobject]@{ name='육하원칙'; titleFontSizePx=15; titleMarginBottomPx=10; bodyFontSizePx=16; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
-            [pscustomobject]@{ name='핵심요약'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=16; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
-            [pscustomobject]@{ name='운영자판단'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=16; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 }
+            [pscustomobject]@{ name='육하원칙'; titleFontSizePx=15; titleMarginBottomPx=10; bodyFontSizePx=15; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
+            [pscustomobject]@{ name='핵심요약'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=15; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
+            [pscustomobject]@{ name='운영자판단'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=15; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 }
         )
-        mobileBodyFontSizePx=16; mobileBodyLineHeightPx=28; mobileParagraphMarginBottomPx=18
+        mobileBodyFontSizePx=15; mobileBodyFontFamily='기본서체'; mobileBodyTextAlignment='justify'; mobileBodyLastLineAlignment='left'; mobileBodyLineHeightPx=27; mobileParagraphMarginBottomPx=18
         mobileBodyParagraphPairCount=1
         mobileParagraphGapLayouts=@(
             [pscustomobject]@{
@@ -106,13 +107,13 @@ try {
         mobileHeadingLayouts=@(
             [pscustomobject]@{
                 text='첫 소제목'; standaloneParagraph=$true; fontSizePx=19
-                marginTopPx=35; marginBottomPx=15
+                marginTopPx=32; marginBottomPx=21
             }
         )
         mobileCalloutLayouts=@(
-            [pscustomobject]@{ name='육하원칙'; titleFontSizePx=15; titleMarginBottomPx=10; bodyFontSizePx=16; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
-            [pscustomobject]@{ name='핵심요약'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=16; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
-            [pscustomobject]@{ name='운영자판단'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=16; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 }
+            [pscustomobject]@{ name='육하원칙'; titleFontSizePx=15; titleMarginBottomPx=10; bodyFontSizePx=15; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
+            [pscustomobject]@{ name='핵심요약'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=15; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 },
+            [pscustomobject]@{ name='운영자판단'; titleFontSizePx=15; titleMarginBottomPx=8; bodyFontSizePx=15; bodyLineHeight=1.75; paragraphMarginBottomPx=18; outerMarginTopPx=30; outerMarginBottomPx=20; blankParagraphCountBefore=0; blankParagraphCountAfter=0 }
         )
         saveAttemptCount=1; publishDelayObserved=$false; recoveryAction=''
     }

@@ -83,9 +83,11 @@ try {
         $plan.imageSpecification.editorAlignment -ne 'center' -or
         $plan.sectionHeadings.Count -ne 3 -or -not $plan.sectionFormatting.bold -or
         $plan.sectionFormatting.titleFontSize -ne 26 -or $plan.sectionFormatting.titleMobileFontSize -ne 24 -or
-        $plan.sectionFormatting.headingFontSize -ne 19 -or $plan.sectionFormatting.bodyFontSize -ne 16 -or
-        $plan.sectionFormatting.bodyLineHeight -ne 1.75 -or
-        $plan.sectionFormatting.bodyLineHeightPx -ne 28 -or
+        $plan.sectionFormatting.headingFontSize -ne 19 -or $plan.sectionFormatting.bodyFontSize -ne 15 -or
+        $plan.sectionFormatting.headingFontFamily -ne '기본서체' -or $plan.sectionFormatting.bodyFontFamily -ne '기본서체' -or
+        $plan.sectionFormatting.bodyTextAlignment -ne 'justify' -or $plan.sectionFormatting.bodyLastLineAlignment -ne 'left' -or
+        $plan.sectionFormatting.bodyLineHeight -ne 1.8 -or
+        $plan.sectionFormatting.bodyLineHeightPx -ne 27 -or
         $plan.sectionFormatting.paragraphMarginBottomPx -ne 18 -or
         $plan.paragraphGapFormatting.mode -ne 'SingleSizedSpacerParagraph' -or
         $plan.paragraphGapFormatting.gapPx -ne 18 -or
@@ -97,11 +99,11 @@ try {
         -not $plan.paragraphGapFormatting.forbidAdjacentToSectionHeadings -or
         -not $plan.paragraphGapFormatting.forbidAdjacentToCallouts -or
         -not $plan.paragraphGapFormatting.requirePcAndMobileMeasurement -or
-        $plan.sectionFormatting.headingMarginTopPx -ne 35 -or
-        $plan.sectionFormatting.headingMarginBottomPx -ne 15 -or
+        $plan.sectionFormatting.headingMarginTopPx -ne 32 -or
+        $plan.sectionFormatting.headingMarginBottomPx -ne 21 -or
         $plan.sectionFormatting.blankLineBeforeAndAfter -or
         -not $plan.sectionFormatting.forbidSpacingBlankParagraphs -or
-        -not $plan.sectionFormatting.dividerEnabled -or
+        $plan.sectionFormatting.dividerEnabled -or
         $plan.sectionFormatting.dividerThicknessPx -ne 2 -or
         $plan.calloutFormatting.renderMode -ne 'ResponsiveTwoCellAccentTable' -or
         $plan.calloutFormatting.defaultCount -ne 3 -or

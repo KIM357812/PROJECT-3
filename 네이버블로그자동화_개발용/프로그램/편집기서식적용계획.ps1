@@ -20,15 +20,37 @@ $referenceGap = $settings.NaverDraft.ReferenceGapDesign
 $plan = [pscustomobject]@{
     schemaVersion = 1
     actionType = 'NaverEditorFormatting'
-    target = '현재 열려 있는 네이버 블로그 편집 글'
+    target = '새 네이버 블로그 글 편집기'
     generatedAt = [DateTimeOffset]::Now.ToString('yyyy-MM-ddTHH:mm:sszzz')
     safety = [pscustomobject]@{
         allowPublicPublish = $false
         allowExternalSave = $false
+        forbidExistingPostEdit = $true
         changeOnlyFormatting = $true
         requireRenderedPcAndMobileVerification = $true
     }
     actions = @(
+        [pscustomobject]@{
+            id = 'ordinary-body-native-style'
+            selectorStrategy = 'EveryOrdinaryBodyParagraph'
+            fontFamily = [string]$settings.NaverDraft.BodyFontFamily
+            fontSizePx = [int]$settings.NaverDraft.BodyFontSize
+            lineHeightPx = [int]$settings.NaverDraft.BodyLineHeightPx
+            alignment = [string]$settings.NaverDraft.BodyTextAlignment
+            lastLineAlignment = [string]$settings.NaverDraft.BodyLastLineAlignment
+            applyWithNativeToolbar = $true
+            requireRightEdgeAlignment = $true
+        },
+        [pscustomobject]@{
+            id = 'section-heading-native-style'
+            selectorStrategy = 'EveryStandaloneSectionHeading'
+            fontFamily = [string]$settings.NaverDraft.HeadingFontFamily
+            fontSizePx = [int]$settings.NaverDraft.SectionHeadingFontSize
+            bold = [bool]$settings.NaverDraft.SectionHeadingBold
+            marginTopPx = [int]$settings.NaverDraft.SectionHeadingMarginTopPx
+            marginBottomPx = [int]$settings.NaverDraft.SectionHeadingMarginBottomPx
+            requireIndependentEditorComponent = $true
+        },
         [pscustomobject]@{
             id = 'ordinary-body-paragraph-gap'
             selectorStrategy = 'EveryEmptyParagraphBetweenTwoOrdinaryBodyParagraphs'

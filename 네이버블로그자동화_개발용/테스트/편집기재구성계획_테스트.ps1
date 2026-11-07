@@ -48,7 +48,10 @@ try {
         -not $ordinary[0].postcondition.requireRenderedHeightMeasurement -or
         @($actions | Where-Object { $_.blockType -eq 'SectionHeading' })[0].formatting.fontSizePx -ne 19 -or
         -not @($actions | Where-Object { $_.blockType -eq 'SectionHeading' })[0].postcondition.requireStandaloneParagraph -or
-        @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].formatting.fontSizePx -ne 16 -or
+        @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].formatting.fontSizePx -ne 15 -or
+        @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].formatting.fontFamily -ne '기본서체' -or
+        @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].formatting.alignment -ne 'justify' -or
+        -not @($actions | Where-Object { $_.blockType -eq 'BodyParagraph' })[0].postcondition.requireRightEdgeAlignment -or
         @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].calloutKind -ne 'FiveWOneH' -or
         @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.accentWidthPx -ne 4 -or
         @($actions | Where-Object { $_.action -eq 'InsertCalloutTable' })[0].formatting.nativeAccentCellWidthPx -ne 20 -or

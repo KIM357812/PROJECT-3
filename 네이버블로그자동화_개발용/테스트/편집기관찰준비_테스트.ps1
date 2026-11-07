@@ -30,6 +30,9 @@ try {
         $null -ne $template.imageServerUploadVerified -or
         $null -ne $template.saveAttemptCount -or
         $null -ne $template.bodyFontSizePx -or
+        -not [string]::IsNullOrWhiteSpace([string]$template.bodyFontFamily) -or
+        -not [string]::IsNullOrWhiteSpace([string]$template.bodyTextAlignment) -or
+        -not [string]::IsNullOrWhiteSpace([string]$template.bodyLastLineAlignment) -or
         $null -ne $template.bodyLineHeightPx -or
         $null -ne $template.paragraphMarginBottomPx -or
         $null -ne $template.bodyParagraphPairCount -or
@@ -38,6 +41,9 @@ try {
         @($template.headingLayouts).Count -ne 0 -or
         @($template.calloutLayouts).Count -ne 0 -or
         $null -ne $template.mobileBodyFontSizePx -or
+        -not [string]::IsNullOrWhiteSpace([string]$template.mobileBodyFontFamily) -or
+        -not [string]::IsNullOrWhiteSpace([string]$template.mobileBodyTextAlignment) -or
+        -not [string]::IsNullOrWhiteSpace([string]$template.mobileBodyLastLineAlignment) -or
         $null -ne $template.mobileBodyLineHeightPx -or
         $null -ne $template.mobileParagraphMarginBottomPx -or
         $null -ne $template.mobileBodyParagraphPairCount -or
@@ -45,7 +51,7 @@ try {
         $null -ne $template.mobileQuestionToReferenceGapLayout -or
         @($template.mobileHeadingLayouts).Count -ne 0 -or
         @($template.mobileCalloutLayouts).Count -ne 0 -or
-        [string]$template.evidenceNote -notlike '*독자 질문→참고자료*' -or
+        [string]$template.evidenceNote -notlike '*기본서체·양쪽 정렬*' -or
         -not [string]::IsNullOrWhiteSpace([string]$template.layoutMeasurementSource) -or
         -not [string]::IsNullOrWhiteSpace([string]$template.title)) {
         throw 'The editor observation template prefilled unobserved safety values.'

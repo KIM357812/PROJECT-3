@@ -11,10 +11,17 @@ try {
     $saved = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $ordinary = @($saved.actions | Where-Object id -eq 'ordinary-body-paragraph-gap')[0]
     $reference = @($saved.actions | Where-Object id -eq 'reader-question-to-reference-gap')[0]
+    $bodyStyle = @($saved.actions | Where-Object id -eq 'ordinary-body-native-style')[0]
+    $headingStyle = @($saved.actions | Where-Object id -eq 'section-heading-native-style')[0]
 
     if ($created.actionType -ne 'NaverEditorFormatting' -or
         $saved.safety.allowPublicPublish -or $saved.safety.allowExternalSave -or
-        -not $saved.safety.changeOnlyFormatting -or @($saved.actions).Count -ne 2 -or
+        -not $saved.safety.changeOnlyFormatting -or -not $saved.safety.forbidExistingPostEdit -or @($saved.actions).Count -ne 4 -or
+        $bodyStyle.fontFamily -ne '기본서체' -or $bodyStyle.fontSizePx -ne 15 -or
+        $bodyStyle.lineHeightPx -ne 27 -or $bodyStyle.alignment -ne 'justify' -or
+        $bodyStyle.lastLineAlignment -ne 'left' -or -not $bodyStyle.requireRightEdgeAlignment -or
+        $headingStyle.fontFamily -ne '기본서체' -or $headingStyle.fontSizePx -ne 19 -or
+        $headingStyle.marginTopPx -ne 32 -or $headingStyle.marginBottomPx -ne 21 -or
         $ordinary.expectedGapPx -ne 18 -or $ordinary.spacerFontSizePx -ne 11 -or
         $ordinary.spacerLineHeight -ne 1.6 -or
         $reference.context -ne 'ReaderQuestionToReferenceLine' -or

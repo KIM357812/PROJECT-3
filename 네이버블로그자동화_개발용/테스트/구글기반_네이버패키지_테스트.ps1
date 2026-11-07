@@ -58,6 +58,10 @@ try {
     $paragraphActions = @($plan.actions | Where-Object type -eq 'PasteStandaloneParagraphBlock')
     Assert-True ($paragraphActions.Count -ge 3) '일반 본문을 독립 문단 블록으로 분리'
     Assert-True (@($paragraphActions | Where-Object { $_.postcondition.paragraphBottomPx -ne 18 }).Count -eq 0) '일반 문단 뒤 18px 사후조건'
+    Assert-True (@($paragraphActions | Where-Object { $_.formatting.fontFamily -ne '기본서체' -or $_.formatting.alignment -ne 'justify' -or $_.formatting.lastLineAlignment -ne 'left' }).Count -eq 0) '본문 기본서체·양쪽 정렬·마지막 줄 왼쪽 기준'
+    Assert-True (@($headingActions | Where-Object { $_.fontFamily -ne '기본서체' }).Count -eq 0) '소제목 기본서체 기준'
+    $calloutActions = @($plan.actions | Where-Object { $_.type -eq 'PasteRenderedAtomicBlock' -and $_.formatting.applyToCalloutBody })
+    Assert-True ($calloutActions.Count -ge 1 -and @($calloutActions | Where-Object { $_.formatting.calloutBodyFontFamily -ne '기본서체' -or $_.formatting.calloutBodyAlignment -ne 'justify' -or -not $_.postcondition.requireCalloutBodyRightEdgeAlignment }).Count -eq 0) '강조 상자 본문 기본서체·양쪽 정렬 기준'
     $blockFiles = @(Get-ChildItem -LiteralPath (Join-Path $result.outputRoot 'blocks') -Filter '*.html')
     Assert-True ($blockFiles.Count -eq [int]$plan.atomicBlockCount -and $blockFiles.Count -gt 0) '원자 입력 블록 파일 수'
     $blockText = ($blockFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
@@ -71,13 +75,13 @@ try {
     Assert-True ($segmentText -match 'line-height:24px') '바탕색 상자 24px 줄높이 기준'
     Assert-True ($segmentText -match 'margin:32px 0 0 0') '참고자료 위 32px 기준'
     Assert-True ($segmentText -match '참고자료 :') '참고자료 표기 기준'
-    Assert-True ($segmentText -notmatch 'text-align\s*:\s*justify') '모바일 본문 왼쪽 정렬'
+    Assert-True ($blockText -match 'text-align\s*:\s*justify' -and $blockText -match 'text-align-last\s*:\s*left') '본문 오른쪽 끝 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
     $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
     foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','앞 32px','뒤 21px','문단 뒤 18px','PasteRenderedSegment')) {
         Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
     }
-    Assert-True ($promptText -notmatch '(?i)text-align:\s*justify\s*;') '프롬프트 템플릿에서 양쪽 정렬 제거'
+    Assert-True ($promptText -match '(?i)text-align:\s*justify\s*;\s*text-align-last:\s*left') '프롬프트 본문 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     Assert-True ($promptText -notmatch '<h[23][^>]+margin:\s*(?:35px\s+0\s+15px|20px\s+0\s+10px)') '프롬프트 소제목의 과거 여백 기준 제거'
     Assert-True (@([regex]::Matches($promptText, '<h[23][^>]+margin:\s*32px\s+0\s+21px')).Count -ge 7) '프롬프트 소제목 32px/21px 기준'
     $after = Get-ChildItem -LiteralPath $source -File | Sort-Object Name | Get-FileHash -Algorithm SHA256

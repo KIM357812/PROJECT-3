@@ -72,6 +72,18 @@ function Test-ObservedNumberWithinTolerance {
     }
 }
 
+function Test-ObservedTextEquals {
+    param(
+        [System.Collections.Generic.List[string]]$Issues,
+        [object]$Observed,
+        [string]$Expected,
+        [string]$Name
+    )
+    if ([string]::IsNullOrWhiteSpace([string]$Observed) -or [string]$Observed -ne $Expected) {
+        Add-EditorIssue $Issues "Observed text layout value does not match the plan: $Name"
+    }
+}
+
 function Test-HeadingLayoutSet {
     param(
         [System.Collections.Generic.List[string]]$Issues,
@@ -282,12 +294,24 @@ if ($isTechnicalArticle) {
     }
     Test-ObservedNumberEquals $issues $observation.bodyFontSizePx `
         ([double]$plan.sectionFormatting.bodyFontSize) 'bodyFontSizePx'
+    Test-ObservedTextEquals $issues $observation.bodyFontFamily `
+        ([string]$plan.sectionFormatting.bodyFontFamily) 'bodyFontFamily'
+    Test-ObservedTextEquals $issues $observation.bodyTextAlignment `
+        ([string]$plan.sectionFormatting.bodyTextAlignment) 'bodyTextAlignment'
+    Test-ObservedTextEquals $issues $observation.bodyLastLineAlignment `
+        ([string]$plan.sectionFormatting.bodyLastLineAlignment) 'bodyLastLineAlignment'
     Test-ObservedNumberEquals $issues $observation.bodyLineHeightPx `
         ([double]$plan.sectionFormatting.bodyLineHeightPx) 'bodyLineHeightPx'
     Test-ObservedNumberEquals $issues $observation.paragraphMarginBottomPx `
         ([double]$plan.sectionFormatting.paragraphMarginBottomPx) 'paragraphMarginBottomPx'
     Test-ObservedNumberEquals $issues $observation.mobileBodyFontSizePx `
         ([double]$plan.sectionFormatting.bodyFontSize) 'mobileBodyFontSizePx'
+    Test-ObservedTextEquals $issues $observation.mobileBodyFontFamily `
+        ([string]$plan.sectionFormatting.bodyFontFamily) 'mobileBodyFontFamily'
+    Test-ObservedTextEquals $issues $observation.mobileBodyTextAlignment `
+        ([string]$plan.sectionFormatting.bodyTextAlignment) 'mobileBodyTextAlignment'
+    Test-ObservedTextEquals $issues $observation.mobileBodyLastLineAlignment `
+        ([string]$plan.sectionFormatting.bodyLastLineAlignment) 'mobileBodyLastLineAlignment'
     Test-ObservedNumberEquals $issues $observation.mobileBodyLineHeightPx `
         ([double]$plan.sectionFormatting.bodyLineHeightPx) 'mobileBodyLineHeightPx'
     Test-ObservedNumberEquals $issues $observation.mobileParagraphMarginBottomPx `
