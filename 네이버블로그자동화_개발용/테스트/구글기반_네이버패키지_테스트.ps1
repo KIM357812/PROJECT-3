@@ -13,7 +13,7 @@ function Assert-True([bool]$Condition, [string]$Message) {
 try {
     New-Item -ItemType Directory -Path $source,$work -Force | Out-Null
     $image = '<div data-blog-image-wrap="true" style="text-align:center;margin:28px 0 28px 0"><img src="data:image/svg+xml;base64,PHN2Zy8+" alt="장면" title="장면"></div>'
-    $html = '<div style="width:100%;max-width:800px;margin:0 auto"><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입</p>' + $image + '<h2 style="font-size:22px;border-bottom:2px solid #000">현황</h2><div style="background:#eee"><p style="line-height:1.6;margin:0 0 8px 0;font-weight:700">강조 제목</p><p style="line-height:1.6">강조 본문</p></div>' + $image + '<h3>분석</h3>' + $image + '<p>전망</p>' + $image + '<div data-blog-sources="true" style="margin:20px 0"><p><strong>출처 :</strong> 링크</p></div></div>'
+    $html = '<div style="width:100%;max-width:800px;margin:0 auto"><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 첫 문단</p><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 둘째 문단</p>' + $image + '<h2 style="font-size:22px;border-bottom:2px solid #000">현황</h2><div style="background:#eee"><p style="line-height:1.6;margin:0 0 8px 0;font-weight:700">강조 제목</p><p style="line-height:1.6">강조 본문</p></div>' + $image + '<h3>분석</h3>' + $image + '<p>전망</p>' + $image + '<div data-blog-sources="true" style="margin:20px 0"><p><strong>출처 :</strong> 링크</p></div></div>'
     Set-Content -LiteralPath (Join-Path $source 'Blogger에_붙여넣을_본문.html') -Value $html -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '메타데이터.txt') -Value "## 5. 해시태그`nAI, 데이터센터, 전력망, 에너지, 기술동향`n## 6. 내부 사실검증표" -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '사실검증표.md') -Value '검증 완료' -Encoding UTF8
@@ -33,6 +33,27 @@ try {
     Assert-True (@($plan.actions | Where-Object type -eq 'UploadImage').Count -eq 4) '이미지 삽입 동작 4개'
     Assert-True (@($plan.actions | Where-Object type -match 'Publish|Save').Count -eq 0) '공개·비공개 발행 동작 없음'
     Assert-True (@($plan.reusedExistingNaverFeatures).Count -eq 3) '기존 네이버 이미지 기능만 재사용'
+    Assert-True (@($plan.actions | Where-Object type -eq 'PasteRenderedSegment').Count -eq 0) '여러 제목·본문을 한 번에 붙여 넣는 구간 동작 금지'
+    $headingActions = @($plan.actions | Where-Object type -eq 'InsertStandaloneHeading')
+    Assert-True ($headingActions.Count -eq 2) 'H2·H3 독립 소제목 동작 수'
+    Assert-True ($plan.headingInsertionMode -eq 'StandaloneParagraphWithMeasuredSpacers') '독립 소제목 삽입 모드'
+    foreach ($headingAction in $headingActions) {
+        $position = [array]::IndexOf(@($plan.actions), $headingAction)
+        Assert-True ($position -gt 0 -and $position -lt (@($plan.actions).Count - 1)) '소제목 앞뒤 동작 존재'
+        $beforeAction = @($plan.actions)[$position - 1]
+        $afterHeading = @($plan.actions)[$position + 1]
+        Assert-True ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq 32) '소제목 위 독립 32px 간격'
+        Assert-True ($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom' -and $afterHeading.heightPx -eq 21) '소제목 아래 독립 21px 간격'
+        Assert-True ([bool]$headingAction.postcondition.requireStandaloneParagraph) '소제목 독립 문단 사후조건'
+        Assert-True ([bool]$headingAction.postcondition.forbidMergedPreviousText -and [bool]$headingAction.postcondition.forbidMergedNextText) '소제목 앞뒤 본문 합침 금지'
+    }
+    $paragraphActions = @($plan.actions | Where-Object type -eq 'PasteStandaloneParagraphBlock')
+    Assert-True ($paragraphActions.Count -ge 3) '일반 본문을 독립 문단 블록으로 분리'
+    Assert-True (@($paragraphActions | Where-Object { $_.postcondition.paragraphBottomPx -ne 18 }).Count -eq 0) '일반 문단 뒤 18px 사후조건'
+    $blockFiles = @(Get-ChildItem -LiteralPath (Join-Path $result.outputRoot 'blocks') -Filter '*.html')
+    Assert-True ($blockFiles.Count -eq [int]$plan.atomicBlockCount -and $blockFiles.Count -gt 0) '원자 입력 블록 파일 수'
+    $blockText = ($blockFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
+    Assert-True ($blockText -notmatch 'data-naver-role="(?:section-heading|subheading)"') '본문 붙여넣기 블록에 소제목 미포함'
     $segmentText = (Get-ChildItem -LiteralPath (Join-Path $result.outputRoot 'segments') -Filter '*.html' | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
     Assert-True ($segmentText -notmatch '<h[23]\b') '네이버 소제목을 안정적인 블록으로 변환'
     Assert-True ($segmentText -match 'data-naver-role="section-heading"') '소제목 역할 표식'
@@ -43,6 +64,14 @@ try {
     Assert-True ($segmentText -match 'margin:32px 0 0 0') '참고자료 위 32px 기준'
     Assert-True ($segmentText -match '참고자료 :') '참고자료 표기 기준'
     Assert-True ($segmentText -notmatch 'text-align\s*:\s*justify') '모바일 본문 왼쪽 정렬'
+    $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
+    $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
+    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','앞 32px','뒤 21px','문단 뒤 18px','PasteRenderedSegment')) {
+        Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
+    }
+    Assert-True ($promptText -notmatch '(?i)text-align:\s*justify\s*;') '프롬프트 템플릿에서 양쪽 정렬 제거'
+    Assert-True ($promptText -notmatch '<h[23][^>]+margin:\s*(?:35px\s+0\s+15px|20px\s+0\s+10px)') '프롬프트 소제목의 과거 여백 기준 제거'
+    Assert-True (@([regex]::Matches($promptText, '<h[23][^>]+margin:\s*32px\s+0\s+21px')).Count -ge 7) '프롬프트 소제목 32px/21px 기준'
     $after = Get-ChildItem -LiteralPath $source -File | Sort-Object Name | Get-FileHash -Algorithm SHA256
     Assert-True (($before.Hash -join '|') -eq ($after.Hash -join '|')) 'Google 입력 자료 무변경'
     Write-Output 'Google 기반 네이버 패키지 테스트 통과'

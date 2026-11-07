@@ -99,6 +99,148 @@ function Assert-NaverSegment([string]$Fragment, [int]$Index) {
     if ($Fragment -match '(?i)text-align\s*:\s*justify') { throw "네이버 구간 $Index 에 모바일 자간을 벌리는 양쪽 정렬이 남아 있습니다." }
 }
 
+function ConvertFrom-HtmlText([string]$Html) {
+    $withoutTags = [regex]::Replace($Html, '(?is)<[^>]+>', '')
+    return [Net.WebUtility]::HtmlDecode($withoutTags).Trim()
+}
+
+function Split-TopLevelHtmlBlocks([string]$Fragment) {
+    $blocks = New-Object 'System.Collections.Generic.List[string]'
+    $tagMatches = @([regex]::Matches($Fragment, '(?is)<!--.*?-->|<![^>]*>|</?[a-z][^>]*>'))
+    $depth = 0
+    $start = -1
+    $voidNames = @('area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr')
+    foreach ($tagMatch in $tagMatches) {
+        $token = $tagMatch.Value
+        if ($token -match '^<!--' -or $token -match '^<!') { continue }
+        $nameMatch = [regex]::Match($token, '(?is)^</?\s*(?<name>[a-z0-9]+)')
+        if (-not $nameMatch.Success) { continue }
+        $name = $nameMatch.Groups['name'].Value.ToLowerInvariant()
+        $isClose = $token -match '^</'
+        $isVoid = $token -match '/>\s*$' -or $voidNames -contains $name
+        if (-not $isClose -and $depth -eq 0) { $start = $tagMatch.Index }
+        if ($isClose) {
+            $depth--
+            if ($depth -eq 0 -and $start -ge 0) {
+                $blocks.Add($Fragment.Substring($start, ($tagMatch.Index + $tagMatch.Length) - $start).Trim())
+                $start = -1
+            }
+        }
+        elseif ($isVoid) {
+            if ($depth -eq 0 -and $start -ge 0) {
+                $blocks.Add($Fragment.Substring($start, ($tagMatch.Index + $tagMatch.Length) - $start).Trim())
+                $start = -1
+            }
+        }
+        else { $depth++ }
+        if ($depth -lt 0) { throw '네이버 블록 분리 중 HTML 닫는 태그 순서가 잘못되었습니다.' }
+    }
+    if ($depth -ne 0) { throw '네이버 블록 분리 중 닫히지 않은 HTML 태그가 있습니다.' }
+    return @($blocks.ToArray())
+}
+
+function Write-NaverBlockFile([string]$Block, [string]$Directory, [int]$Sequence) {
+    [IO.Directory]::CreateDirectory($Directory) | Out-Null
+    $path = Join-Path $Directory ('block-{0:D3}.html' -f $Sequence)
+    $document = @"
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>네이버 독립 입력 블록 $Sequence</title></head><body style="margin:0;background:#fff;">
+<div data-naver-atomic-block="true" style="width:100%;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#222;box-sizing:border-box;">$Block</div>
+</body></html>
+"@
+    [IO.File]::WriteAllText($path, $document, (New-Object Text.UTF8Encoding($false)))
+    return $path
+}
+
+function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segment, [string]$BlockDirectory, [object]$Formatting, [ref]$BlockSequence) {
+    $blocks = @(Split-TopLevelHtmlBlocks -Fragment ([string]$Segment.fragment))
+    foreach ($block in $blocks) {
+        if ([string]::IsNullOrWhiteSpace((ConvertFrom-HtmlText $block))) { continue }
+        $heading = [regex]::Match($block, '(?is)^<div\s+data-naver-role="(?<role>section-heading|subheading)"[^>]*>\s*<p[^>]*>(?<text>.*?)</p>\s*</div>$')
+        if ($heading.Success) {
+            $role = $heading.Groups['role'].Value
+            $fontSize = if ($role -eq 'section-heading') { [int]$Formatting.SectionHeadingFontSizePx } else { [int]$Formatting.SubheadingFontSizePx }
+            $Actions.Add([pscustomobject]@{
+                order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingTop'
+                heightPx=[int]$Formatting.SectionHeadingTopPx; naverFontSizePx=16; naverLineHeightPercent=200
+                postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=[int]$Formatting.SectionHeadingTopPx }
+            })
+            $Actions.Add([pscustomobject]@{
+                order=$Order.Value++; type='InsertStandaloneHeading'; level=($(if ($role -eq 'section-heading') { 2 } else { 3 }))
+                text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontSizePx=$fontSize; bold=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx
+                postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true }
+            })
+            $Actions.Add([pscustomobject]@{
+                order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'
+                heightPx=[int]$Formatting.SectionHeadingBottomPx; naverFontSizePx=13; naverLineHeightPercent=160
+                postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=[int]$Formatting.SectionHeadingBottomPx; tolerancePx=0.5 }
+            })
+            continue
+        }
+        $BlockSequence.Value++
+        $path = Write-NaverBlockFile -Block $block -Directory $BlockDirectory -Sequence $BlockSequence.Value
+        $type = if ($block -match '(?is)^<p\b') { 'PasteStandaloneParagraphBlock' } else { 'PasteRenderedAtomicBlock' }
+        $Actions.Add([pscustomobject]@{
+            order=$Order.Value++; type=$type; path=$path
+            postcondition=[pscustomobject]@{
+                requireSingleTopLevelBlock=$true
+                requireStandaloneParagraph=($type -eq 'PasteStandaloneParagraphBlock')
+                paragraphBottomPx=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [int]$Formatting.ParagraphBottomPx } else { $null })
+            }
+        })
+    }
+}
+
+function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
+    if (@($Actions | Where-Object type -eq 'PasteRenderedSegment').Count -gt 0) {
+        throw '네이버 편집 계획에 제목과 본문을 합치는 구간 붙여넣기가 포함되어 있습니다.'
+    }
+
+    $headingCount = 0
+    for ($index = 0; $index -lt $Actions.Count; $index++) {
+        $action = $Actions[$index]
+        if ([string]$action.type -eq 'InsertStandaloneHeading') {
+            $headingCount++
+            if ($index -eq 0 -or $index -eq ($Actions.Count - 1)) {
+                throw '독립 소제목 앞뒤에 간격 동작이 없습니다.'
+            }
+            $before = $Actions[$index - 1]
+            $after = $Actions[$index + 1]
+            if ([string]$before.type -ne 'InsertVerticalSpacer' -or [string]$before.purpose -ne 'HeadingTop' -or
+                [int]$before.heightPx -ne [int]$Formatting.SectionHeadingTopPx) {
+                throw '독립 소제목 위 32px 간격 동작이 올바르지 않습니다.'
+            }
+            if ([string]$after.type -ne 'InsertVerticalSpacer' -or [string]$after.purpose -ne 'HeadingBottom' -or
+                [int]$after.heightPx -ne [int]$Formatting.SectionHeadingBottomPx) {
+                throw '독립 소제목 아래 21px 간격 동작이 올바르지 않습니다.'
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$action.text) -or
+                -not [bool]$action.postcondition.requireStandaloneParagraph -or
+                -not [bool]$action.postcondition.forbidMergedPreviousText -or
+                -not [bool]$action.postcondition.forbidMergedNextText) {
+                throw '독립 소제목의 텍스트 또는 합침 금지 사후조건이 올바르지 않습니다.'
+            }
+        }
+
+        if ([string]$action.type -eq 'PasteStandaloneParagraphBlock') {
+            if (-not [bool]$action.postcondition.requireSingleTopLevelBlock -or
+                -not [bool]$action.postcondition.requireStandaloneParagraph -or
+                [int]$action.postcondition.paragraphBottomPx -ne [int]$Formatting.ParagraphBottomPx) {
+                throw '일반 문단의 독립 블록 또는 문단 뒤 18px 사후조건이 올바르지 않습니다.'
+            }
+        }
+
+        if ([string]$action.type -eq 'PasteRenderedAtomicBlock') {
+            $blockHtml = [IO.File]::ReadAllText([string]$action.path, [Text.Encoding]::UTF8)
+            if ($blockHtml -match 'data-naver-role="(?:section-heading|subheading)"') {
+                throw '본문 원자 블록 안에 소제목이 포함되어 있습니다.'
+            }
+        }
+    }
+    if ($headingCount -eq 0) { throw '네이버 편집 계획에 독립 소제목이 없습니다.' }
+}
+
 function New-SegmentFiles([string]$Html, [string]$Directory, [object]$Formatting) {
     $wrapperPattern = '(?is)<div\b(?=[^>]*\bdata-blog-image-wrap\s*=\s*["'']true["''])[^>]*>\s*<img\b[^>]*>\s*</div>'
     $matches = @([regex]::Matches($Html, $wrapperPattern))
@@ -126,7 +268,7 @@ function New-SegmentFiles([string]$Html, [string]$Directory, [object]$Formatting
 </body></html>
 "@
         [IO.File]::WriteAllText($segmentPath, $document, (New-Object Text.UTF8Encoding($false)))
-        $segments.Add([pscustomobject]@{ order = $index + 1; path = $segmentPath })
+        $segments.Add([pscustomobject]@{ order = $index + 1; path = $segmentPath; fragment = $fragment })
         if ($index -lt $matches.Count) { $cursor = $matches[$index].Index + $matches[$index].Length }
     }
     return @($segments.ToArray())
@@ -196,14 +338,17 @@ $actions = New-Object 'System.Collections.Generic.List[object]'
 $actions.Add([pscustomobject]@{ order = 1; type = 'OpenNewPost'; url = [string]$config.Naver.WriteUrl })
 $actions.Add([pscustomobject]@{ order = 2; type = 'SetTitle'; text = [string]$job.RecommendedTitle })
 $order = 3
+$blockSequence = 0
+$blockDirectory = Join-Path $outputRoot 'blocks'
 for ($index = 0; $index -lt 4; $index++) {
-    $actions.Add([pscustomobject]@{ order = $order++; type = 'PasteRenderedSegment'; path = [string]$segments[$index].path })
+    Add-AtomicSegmentActions -Actions $actions -Order ([ref]$order) -Segment $segments[$index] -BlockDirectory $blockDirectory -Formatting $config.EditorFormatting -BlockSequence ([ref]$blockSequence)
     $role = @($config.ImageAutomation.Roles | Sort-Object Order)[$index]
     $actions.Add([pscustomobject]@{ order = $order++; type = 'UploadImage'; path = (Join-Path (Join-Path $imageRoot 'optimized') ([string]$role.OutputFileName)); alignment = 'center'; displayWidth = [int]$config.ImageAutomation.EditorDisplayWidth })
 }
-$actions.Add([pscustomobject]@{ order = $order++; type = 'PasteRenderedSegment'; path = [string]$segments[4].path })
+Add-AtomicSegmentActions -Actions $actions -Order ([ref]$order) -Segment $segments[4] -BlockDirectory $blockDirectory -Formatting $config.EditorFormatting -BlockSequence ([ref]$blockSequence)
 $actions.Add([pscustomobject]@{ order = $order++; type = 'SetTags'; values = @($tags) })
 $actions.Add([pscustomobject]@{ order = $order++; type = 'StopBeforePublicationSettings' })
+Assert-AtomicEditorPlan -Actions @($actions.ToArray()) -Formatting $config.EditorFormatting
 
 $planPath = Join-Path $outputRoot '네이버편집계획.json'
 $plan = [pscustomobject]@{
@@ -216,6 +361,8 @@ $plan = [pscustomobject]@{
     tags = @($tags)
     imageManifest = $imageManifestPath
     actions = @($actions.ToArray())
+    atomicBlockCount = $blockSequence
+    headingInsertionMode = 'StandaloneParagraphWithMeasuredSpacers'
     stopPoint = 'BeforePublicationSettings'
     publicationSettingsOpened = $false
     publicPublishPerformed = $false
