@@ -31,19 +31,21 @@ Assert (-not (Test-ArticleHost 'https://www.powermag.com/tag/ups' 'powermag.com'
 Assert (-not (Test-ArticleHost 'https://www.powermag.com/event/experience-power-2026' 'powermag.com')) '행사 페이지 차단'
 Assert (Test-ArticleHost 'https://www.powermag.com/grid-modernization-helps-utilities-add-capacity' 'powermag.com') 'POWER 기사 허용'
 $today = (Get-Date).Date
-$older = $today.AddDays(-31).ToString('yyyy-MM-dd')
+$older = $today.AddDays(-8).ToString('yyyy-MM-dd')
 $candidate = [pscustomobject]@{ Number=1;Title='테스트';Site='TechCrunch';Date=$older;Url='https://techcrunch.com/old';Reason='이유';Summary=@('가','나');Details='테스트' }
-Assert (@(Select-ValidCandidates @($candidate)).Count -eq 0) '30일 밖 기사 제외'
+Assert (@(Select-ValidCandidates @($candidate)).Count -eq 0) '7일 밖 기사 제외'
+$candidate.Date = $today.AddDays(-7).ToString('yyyy-MM-dd')
+Assert (@(Select-ValidCandidates @($candidate)).Count -eq 1) '7일 경계 기사 허용'
 $candidate.Date = '게시일 확인 불가'
-Assert (@(Select-ValidCandidates @($candidate)).Count -eq 1) '날짜 미확인 후보 유지'
-$alreadyUsed = [pscustomobject]@{ Number=2;Title='작성 완료';Site='The Verge';Date='게시일 확인 불가';Url='https://www.theverge.com/ai-artificial-intelligence/1002033/openai-dots-launch-muse-competitor';Reason='이유';Summary=@('가','나');Details='테스트' }
+Assert (@(Select-ValidCandidates @($candidate)).Count -eq 0) '날짜 미확인 후보 제외'
+$alreadyUsed = [pscustomobject]@{ Number=2;Title='작성 완료';Site='The Verge';Date=$today.ToString('yyyy-MM-dd');Url='https://www.theverge.com/ai-artificial-intelligence/1002033/openai-dots-launch-muse-competitor';Reason='이유';Summary=@('가','나');Details='테스트' }
 $oldUsedPath = $script:UsedUrlPath
 $script:UsedUrlPath = Join-Path ([IO.Path]::GetTempPath()) ('blog_used_'+[guid]::NewGuid().ToString('N')+'.txt')
 try {
     Add-UsedUrl $alreadyUsed.Url
-    Assert (@(Select-ValidCandidates @($alreadyUsed)).Count -eq 0) '작성 완료 URL 제외'
+    Assert (@(Select-ValidCandidates @($alreadyUsed)).Count -eq 1) '작성 완료 URL도 사용자 선택 후보로 허용'
 } finally {
     if ([IO.File]::Exists($script:UsedUrlPath)) { [IO.File]::Delete($script:UsedUrlPath) }
     $script:UsedUrlPath = $oldUsedPath
 }
-Write-Output '통과: RSS, Atom, 사이트맵, HTML, 피드 발견, URL 정규화, 날짜 필터, 미확인 날짜'
+Write-Output '통과: RSS, Atom, 사이트맵, HTML, 피드 발견, URL 정규화, 최근 7일 필터, 이전 작성 URL 허용'

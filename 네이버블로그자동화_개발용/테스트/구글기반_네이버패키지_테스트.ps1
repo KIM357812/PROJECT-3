@@ -31,14 +31,25 @@ try {
 
     $plan = Get-Content -LiteralPath $result.editorPlan -Raw -Encoding UTF8 | ConvertFrom-Json
     $contract = Get-Content -LiteralPath $result.executionContract -Raw -Encoding UTF8 | ConvertFrom-Json
-    Assert-True (@($plan.actions | Where-Object type -eq 'UploadImage').Count -eq 4) '이미지 삽입 동작 4개'
+    Assert-True (@($plan.actions | Where-Object type -eq 'InsertImageAnchor').Count -eq 4) '이미지 앵커 4개'
+    Assert-True (@($plan.actions | Where-Object type -eq 'UploadImageAtAnchor').Count -eq 4) '앵커 이미지 삽입 동작 4개'
     Assert-True (@($plan.actions | Where-Object type -match 'Publish|Save').Count -eq 0) '공개·비공개 발행 동작 없음'
     Assert-True ($result.executionStatus -eq 'NotExecuted' -and -not [bool]$result.completionClaimAllowed) '실행 전 패키지를 완료로 표시하지 않음'
     Assert-True ($contract.executionMode -eq 'ComputerUseNewPostOnly') '컴퓨터 사용 새 글 전용 실행 계약'
+    Assert-True ($plan.schemaVersion -eq 3 -and $contract.schemaVersion -eq 4) '강화된 편집 실행 계약 버전'
     Assert-True ([bool]$contract.guards.existingPostModificationForbidden) '기존 글 수정 금지 실행 가드'
     Assert-True ([bool]$contract.guards.publicationSettingsForbidden -and [bool]$contract.guards.publicOrPrivatePublishForbidden) '발행 설정·게시 금지 실행 가드'
     Assert-True (@($contract.steps).Count -eq @($plan.actions).Count) '편집 계획 전체 동작이 실행 계약에 연결됨'
     Assert-True (@($contract.steps | Where-Object { -not $_.postcondition.stopImmediatelyOnMismatch }).Count -eq 0) '동작 불일치 즉시 중단'
+    Assert-True ($contract.guards.imageConstructionMode -eq 'TextFirstThenReverseAnchorUpload' -and [bool]$contract.guards.forbidFormattedPasteAfterFirstImageUpload -and [bool]$contract.guards.requireAllPriorImageUrlsAfterEveryUpload) '본문 완성 후 이미지 역순 삽입 가드'
+    $uploadActions = @($plan.actions | Where-Object type -eq 'UploadImageAtAnchor')
+    Assert-True (($uploadActions.documentOrder -join ',') -eq '4,3,2,1') '이미지 문서 역순 업로드'
+    $firstUploadPosition = [array]::IndexOf(@($plan.actions), $uploadActions[0])
+    $lateTextActions = @(@($plan.actions)[($firstUploadPosition + 1)..(@($plan.actions).Count - 1)] | Where-Object type -match 'Paste|Heading|Spacer')
+    Assert-True ($lateTextActions.Count -eq 0) '첫 이미지 업로드 이후 본문 붙여넣기 금지'
+    Assert-True (@($plan.actions | Where-Object type -eq 'ClearEditorBody').Count -eq 1) '이전 편집 내용 제거 후 전체 재구성'
+    $normalize = @($plan.actions | Where-Object type -eq 'NormalizeBodyDefaults')
+    Assert-True ($normalize.Count -eq 1 -and -not [bool]$normalize[0].bold -and $normalize[0].fontFamily -eq '기본서체' -and $normalize[0].fontSizePx -eq 15) '본문 기본서식과 굵기 해제 선행'
     Assert-True (@($contract.steps | Where-Object { $_.action -eq 'InsertStandaloneHeading' -and -not $_.postcondition.requireIndependentEditorComponent }).Count -eq 0) '소제목 독립 구성요소 실행 조건'
     Assert-True (@($plan.reusedExistingNaverFeatures).Count -eq 3) '기존 네이버 이미지 기능만 재사용'
     Assert-True (@($plan.actions | Where-Object type -eq 'PasteRenderedSegment').Count -eq 0) '여러 제목·본문을 한 번에 붙여 넣는 구간 동작 금지'
@@ -59,9 +70,20 @@ try {
     Assert-True ($paragraphActions.Count -ge 3) '일반 본문을 독립 문단 블록으로 분리'
     Assert-True (@($paragraphActions | Where-Object { $_.postcondition.paragraphBottomPx -ne 18 }).Count -eq 0) '일반 문단 뒤 18px 사후조건'
     Assert-True (@($paragraphActions | Where-Object { $_.formatting.fontFamily -ne '기본서체' -or $_.formatting.alignment -ne 'justify' -or $_.formatting.lastLineAlignment -ne 'left' }).Count -eq 0) '본문 기본서체·양쪽 정렬·마지막 줄 왼쪽 기준'
+    Assert-True (@($paragraphActions | Where-Object { [bool]$_.formatting.bold -or -not [bool]$_.formatting.resetInlineFormattingBefore }).Count -eq 0) '본문마다 상속 굵기 제거 후 입력'
     Assert-True (@($headingActions | Where-Object { $_.fontFamily -ne '기본서체' }).Count -eq 0) '소제목 기본서체 기준'
+    Assert-True (@($headingActions | Where-Object { -not [bool]$_.bold -or -not [bool]$_.resetInlineFormattingBefore }).Count -eq 0) '소제목마다 인라인 서식 초기화 후 굵기 적용'
     $calloutActions = @($plan.actions | Where-Object { $_.type -eq 'PasteRenderedAtomicBlock' -and $_.formatting.applyToCalloutBody })
     Assert-True ($calloutActions.Count -ge 1 -and @($calloutActions | Where-Object { $_.formatting.calloutBodyFontFamily -ne '기본서체' -or $_.formatting.calloutBodyAlignment -ne 'justify' -or -not $_.postcondition.requireCalloutBodyRightEdgeAlignment }).Count -eq 0) '강조 상자 본문 기본서체·양쪽 정렬 기준'
+    Assert-True (@($calloutActions | Where-Object { [bool]$_.formatting.calloutBodyBold }).Count -eq 0) '강조 상자 본문 굵기 상속 차단'
+    $audit = @($plan.actions | Where-Object type -eq 'VerifyWholeEditor')
+    Assert-True ($audit.Count -eq 1 -and $audit[0].expectedHeadingCount -eq $headingActions.Count -and [bool]$audit[0].requireBodyBoldFalse -and [bool]$audit[0].rejectMergedHeadingBody) '종료 전 전체 문서 소제목·본문 굵기·합침 감사'
+    Assert-True ([bool]$contract.guards.requireWholeEditorAuditBeforeStop -and [bool]$contract.guards.rejectInheritedBoldBody) '전체 감사와 굵기 상속 차단 실행 가드'
+    Assert-True ([bool]$contract.guards.forbidGlobalMixedSelectionBoldToggle -and [bool]$contract.guards.requireExactParagraphSelection -and [bool]$contract.guards.requireSetStateNotToggle -and [bool]$contract.guards.requireToolbarPostconditionAfterEveryTextBlock) '문단별 멱등 서식 실행 가드'
+    Assert-True ([bool]$contract.guards.preserveListedInlineBoldLabels) '육하원칙 등 부분 굵기 라벨 보존 가드'
+    Assert-True ($contract.guards.browserBinding -eq 'ChromeExtensionTab' -and [bool]$contract.guards.forbidWindowsAppWindowBinding -and [bool]$contract.guards.requireOuterAndInnerUrlMatch) 'Chrome 확장 탭 URL 이중 검증 가드'
+    Assert-True ($contract.guards.selectionMode -eq 'NativeTripleClickRenderedParagraph' -and [bool]$contract.guards.forbidAccessibilitySelectText -and [bool]$contract.guards.requireRenderedDomPostcondition -and [bool]$contract.guards.rejectToolbarOnlyAudit) '실제 문단 선택·DOM 사후검증 가드'
+    Assert-True ($contract.guards.requiredBodyFontClass -eq 'se-fs15' -and $contract.guards.forbiddenBodyFontClass -eq 'se-fs30' -and $contract.guards.requiredBodyBoldElementCount -eq 0 -and $contract.guards.maxRepairPasses -eq 2) '본문 글자 크기·굵기·복구 횟수 가드'
     $blockFiles = @(Get-ChildItem -LiteralPath (Join-Path $result.outputRoot 'blocks') -Filter '*.html')
     Assert-True ($blockFiles.Count -eq [int]$plan.atomicBlockCount -and $blockFiles.Count -gt 0) '원자 입력 블록 파일 수'
     $blockText = ($blockFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"

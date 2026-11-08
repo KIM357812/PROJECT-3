@@ -26,30 +26,40 @@ foreach ($directory in @($runtimeRoot, $naverWorkRoot)) {
 
 $previousRuntime = $env:NAVER_AUTOMATION_RUNTIME_ROOT
 $previousNoOpen = $env:NAVER_AUTOMATION_NO_OPEN
-$previousAutoSelect = $env:NAVER_AUTOMATION_AUTO_SELECT_TOP
-$previousModel = $env:BLOG_AUTOMATION_CODEX_MODEL
+$previousRuns = @(Get-ChildItem -LiteralPath (Join-Path $runtimeRoot '작업대기') -Filter '작업상태.json' -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object FullName)
 try {
     $env:NAVER_AUTOMATION_RUNTIME_ROOT = $runtimeRoot
     $env:NAVER_AUTOMATION_NO_OPEN = '1'
-    $env:NAVER_AUTOMATION_AUTO_SELECT_TOP = '1'
-    $env:BLOG_AUTOMATION_CODEX_MODEL = 'gpt-6.1-sol'
-    $arguments = @('-NoWatcher', '-AutoStart')
-    if ($CachedOnly) { $arguments += '-CachedOnly' }
-    if (-not [string]::IsNullOrWhiteSpace($SearchResponsePath)) { $arguments += @('-SearchResponsePath', $SearchResponsePath) }
+    # PowerShell script switches require named splatting; string arrays do not bind them.
+    $arguments = @{NoWatcher=$true; AutoStart=$true}
+    if ($CachedOnly) { $arguments.CachedOnly = $true }
+    if (-not [string]::IsNullOrWhiteSpace($SearchResponsePath)) { $arguments.SearchResponsePath = $SearchResponsePath }
     & $startPath @arguments
 }
 finally {
     $env:NAVER_AUTOMATION_RUNTIME_ROOT = $previousRuntime
     $env:NAVER_AUTOMATION_NO_OPEN = $previousNoOpen
-    $env:NAVER_AUTOMATION_AUTO_SELECT_TOP = $previousAutoSelect
-    $env:BLOG_AUTOMATION_CODEX_MODEL = $previousModel
 }
 
-$latestArticle = Get-ChildItem -LiteralPath (Join-Path $runtimeRoot '작업완료') -Directory -Recurse -ErrorAction SilentlyContinue |
-    Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Blogger에_붙여넣을_본문.html') } |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-if ($null -eq $latestArticle) { throw 'Google 기반 자동화가 완성 글 폴더를 만들지 못했습니다.' }
-
-$contentId = 'NTE-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
-& $adapterPath -SourceArticlePath $latestArticle.FullName -WorkRoot $naverWorkRoot -ContentId $contentId
+. (Join-Path $PSScriptRoot '새글생성결과검증.ps1')
+$articlePaths = @(Get-NaverGeneratedArticles -RuntimeRoot $runtimeRoot -PreviousRuns $previousRuns)
+$packages = New-Object System.Collections.ArrayList
+$sequence = 0
+foreach ($articlePath in $articlePaths) {
+    $sequence++
+    $contentId = 'NTE-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + ('-{0:D2}' -f $sequence)
+    $package = & $adapterPath -SourceArticlePath $articlePath -WorkRoot $naverWorkRoot -ContentId $contentId | ConvertFrom-Json
+    $executionPackagePath = Join-Path ([string]$package.outputRoot) '실행패키지.json'
+    $package | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $executionPackagePath -Encoding UTF8
+    [void]$packages.Add($package)
+}
+$queue = [pscustomobject]@{
+    schemaVersion = 1
+    selectedCount = $packages.Count
+    createdAt = (Get-Date).ToString('o')
+    packages = @($packages.ToArray())
+}
+$queuePath = Join-Path $naverWorkRoot ('작업대기_{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$queue | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $queuePath -Encoding UTF8
+$queue | Add-Member -NotePropertyName queueManifest -NotePropertyValue $queuePath
+$queue | ConvertTo-Json -Depth 15

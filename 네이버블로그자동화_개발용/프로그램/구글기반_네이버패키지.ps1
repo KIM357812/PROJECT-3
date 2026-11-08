@@ -9,11 +9,12 @@ param(
 
     [string]$ContentId = ('NTE-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
 
-    [string]$ConfigPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '네이버통합설정.json')
+    [string]$ConfigPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $projectRoot '네이버통합설정.json' }
 $imagePreparePath = Join-Path $PSScriptRoot '이미지작업준비.ps1'
 $requiredFiles = @(
     'Blogger에_붙여넣을_본문.html',
@@ -168,7 +169,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertStandaloneHeading'; level=($(if ($role -eq 'section-heading') { 2 } else { 3 }))
                 text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
-                fontSizePx=$fontSize; bold=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
+                fontSizePx=$fontSize; bold=$true; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
                 postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
             })
             $Actions.Add([pscustomobject]@{
@@ -194,10 +195,13 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
                 alignment=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.TextAlignment } else { $null })
                 lastLineAlignment=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.LastLineAlignment } else { $null })
                 applyWithNativeToolbar=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [bool]$Formatting.RequireNativeFontApplication } else { $false })
+                bold=$(if ($type -eq 'PasteStandaloneParagraphBlock') { $false } else { $null })
+                resetInlineFormattingBefore=$(if ($type -eq 'PasteStandaloneParagraphBlock') { $true } else { $false })
                 applyToCalloutBody=$isCallout
                 calloutBodyFontFamily=$(if ($isCallout) { [string]$Formatting.BodyFontFamily } else { $null })
                 calloutBodyAlignment=$(if ($isCallout) { [string]$Formatting.TextAlignment } else { $null })
                 calloutLastLineAlignment=$(if ($isCallout) { [string]$Formatting.LastLineAlignment } else { $null })
+                calloutBodyBold=$(if ($isCallout) { $false } else { $null })
                 preserveCalloutTitleLeft=$isCallout
             }
             postcondition=[pscustomobject]@{
@@ -220,6 +224,21 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
     }
 
     $headingCount = 0
+    $anchors = @($Actions | Where-Object type -eq 'InsertImageAnchor')
+    $uploads = @($Actions | Where-Object type -eq 'UploadImageAtAnchor')
+    if ($anchors.Count -ne 4 -or $uploads.Count -ne 4) {
+        throw '이미지 앵커와 최종 업로드 동작은 각각 정확히 4개여야 합니다.'
+    }
+    $firstUploadIndex = [array]::IndexOf($Actions, $uploads[0])
+    if (@($Actions[($firstUploadIndex + 1)..($Actions.Count - 1)] | Where-Object type -in @('PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','InsertStandaloneHeading','InsertVerticalSpacer')).Count -gt 0) {
+        throw '첫 이미지 업로드 뒤에는 본문·소제목·간격 붙여넣기 동작이 올 수 없습니다.'
+    }
+    $anchorIds = @($anchors | ForEach-Object { [string]$_.anchorId })
+    $uploadAnchorIds = @($uploads | ForEach-Object { [string]$_.anchorId })
+    [array]::Reverse($anchorIds)
+    if (($anchorIds -join '|') -ne ($uploadAnchorIds -join '|')) {
+        throw '이미지는 문서 뒤쪽 앵커부터 역순으로 업로드해야 합니다.'
+    }
     for ($index = 0; $index -lt $Actions.Count; $index++) {
         $action = $Actions[$index]
         if ([string]$action.type -eq 'InsertStandaloneHeading') {
@@ -238,6 +257,8 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
                 throw '독립 소제목 아래 21px 간격 동작이 올바르지 않습니다.'
             }
             if ([string]::IsNullOrWhiteSpace([string]$action.text) -or
+                -not [bool]$action.bold -or
+                -not [bool]$action.resetInlineFormattingBefore -or
                 -not [bool]$action.postcondition.requireStandaloneParagraph -or
                 -not [bool]$action.postcondition.forbidMergedPreviousText -or
                 -not [bool]$action.postcondition.forbidMergedNextText) {
@@ -251,6 +272,8 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
                 [int]$action.postcondition.paragraphBottomPx -ne [int]$Formatting.ParagraphBottomPx -or
                 [string]$action.formatting.fontFamily -ne [string]$Formatting.BodyFontFamily -or
                 [string]$action.formatting.alignment -ne 'justify' -or
+                [bool]$action.formatting.bold -or
+                -not [bool]$action.formatting.resetInlineFormattingBefore -or
                 -not [bool]$action.postcondition.requireRightEdgeAlignment -or
                 -not [bool]$action.postcondition.requireLastLineLeft) {
                 throw '일반 문단의 독립 블록·글꼴·양쪽 정렬 또는 문단 뒤 18px 사후조건이 올바르지 않습니다.'
@@ -265,6 +288,7 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
             if ([bool]$action.formatting.applyToCalloutBody -and
                 ([string]$action.formatting.calloutBodyFontFamily -ne [string]$Formatting.BodyFontFamily -or
                  [string]$action.formatting.calloutBodyAlignment -ne 'justify' -or
+                 [bool]$action.formatting.calloutBodyBold -or
                  -not [bool]$action.postcondition.requireCalloutBodyRightEdgeAlignment)) {
                 throw '강조 상자 본문의 기본서체 또는 양쪽 정렬 실행 조건이 올바르지 않습니다.'
             }
@@ -275,9 +299,9 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
 
 function New-ComputerUseExecutionContract([object]$Plan) {
     $supportedTypes = @(
-        'OpenNewPost','SetTitle','InsertVerticalSpacer','InsertStandaloneHeading',
-        'PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','UploadImage',
-        'SetTags','StopBeforePublicationSettings'
+        'OpenNewPost','ClearEditorBody','SetTitle','NormalizeBodyDefaults','InsertVerticalSpacer','InsertStandaloneHeading',
+        'PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','InsertImageAnchor','UploadImageAtAnchor',
+        'VerifyWholeEditor','SetTags','StopBeforePublicationSettings'
     )
     $steps = New-Object 'System.Collections.Generic.List[object]'
     foreach ($action in @($Plan.actions | Sort-Object order)) {
@@ -291,11 +315,11 @@ function New-ComputerUseExecutionContract([object]$Plan) {
             precondition = [pscustomobject]@{
                 requireNewPostEditor = $true
                 forbidExistingPostEdit = $true
-                requireEditorBodyFocus = (@('InsertVerticalSpacer','InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','UploadImage') -contains [string]$action.type)
+                requireEditorBodyFocus = (@('ClearEditorBody','NormalizeBodyDefaults','InsertVerticalSpacer','InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','InsertImageAnchor','UploadImageAtAnchor') -contains [string]$action.type)
             }
             postcondition = [pscustomobject]@{
                 requireActionSuccess = $true
-                requireIndependentEditorComponent = (@('InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock') -contains [string]$action.type)
+                requireIndependentEditorComponent = (@('InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','InsertImageAnchor','UploadImageAtAnchor') -contains [string]$action.type)
                 requireMeasuredSpacing = ([string]$action.type -eq 'InsertVerticalSpacer')
                 requireNativeFontVerification = ((@('InsertStandaloneHeading','PasteStandaloneParagraphBlock') -contains [string]$action.type) -or [bool]$action.formatting.applyToCalloutBody)
                 requireRightEdgeAlignmentVerification = (([string]$action.type -eq 'PasteStandaloneParagraphBlock') -or [bool]$action.formatting.applyToCalloutBody)
@@ -304,7 +328,7 @@ function New-ComputerUseExecutionContract([object]$Plan) {
         })
     }
     return [pscustomobject]@{
-        schemaVersion = 1
+        schemaVersion = 4
         contentId = [string]$Plan.contentId
         executionMode = 'ComputerUseNewPostOnly'
         executionStatus = 'NotExecuted'
@@ -315,6 +339,29 @@ function New-ComputerUseExecutionContract([object]$Plan) {
             publicOrPrivatePublishForbidden = $true
             requireActionByActionObservation = $true
             requirePcAndMobileResultValidation = $true
+            requireWholeEditorAuditBeforeStop = $true
+            rejectInheritedBoldBody = $true
+            forbidGlobalMixedSelectionBoldToggle = $true
+            requireExactParagraphSelection = $true
+            requireSetStateNotToggle = $true
+            requireToolbarPostconditionAfterEveryTextBlock = $true
+            preserveListedInlineBoldLabels = $true
+            browserBinding = 'ChromeExtensionTab'
+            forbidWindowsAppWindowBinding = $true
+            requireOuterAndInnerUrlMatch = $true
+            failClosedWhenUrlUncertain = $true
+            selectionMode = 'NativeTripleClickRenderedParagraph'
+            scrollMode = 'CenterVisibleOutsideFixedToolbar'
+            forbidAccessibilitySelectText = $true
+            requireRenderedDomPostcondition = $true
+            rejectToolbarOnlyAudit = $true
+            requiredBodyFontClass = 'se-fs15'
+            forbiddenBodyFontClass = 'se-fs30'
+            requiredBodyBoldElementCount = 0
+            maxRepairPasses = 2
+            imageConstructionMode = 'TextFirstThenReverseAnchorUpload'
+            forbidFormattedPasteAfterFirstImageUpload = $true
+            requireAllPriorImageUrlsAfterEveryUpload = $true
         }
         steps = @($steps.ToArray())
     }
@@ -415,23 +462,58 @@ $segments = @(New-SegmentFiles -Html $html -Directory (Join-Path $outputRoot 'se
 
 $actions = New-Object 'System.Collections.Generic.List[object]'
 $actions.Add([pscustomobject]@{ order = 1; type = 'OpenNewPost'; url = [string]$config.Naver.WriteUrl })
-$actions.Add([pscustomobject]@{ order = 2; type = 'SetTitle'; text = [string]$job.RecommendedTitle })
-$order = 3
+$actions.Add([pscustomobject]@{ order = 2; type = 'ClearEditorBody'; preserveTitle = $false; requireNewPostEditor = $true })
+$actions.Add([pscustomobject]@{ order = 3; type = 'SetTitle'; text = [string]$job.RecommendedTitle })
+$actions.Add([pscustomobject]@{
+    order = 4; type = 'NormalizeBodyDefaults'; fontFamily = [string]$config.EditorFormatting.BodyFontFamily
+    fontSizePx = [int]$config.EditorFormatting.BodyFontSizePx; lineHeightPx = [int]$config.EditorFormatting.BodyLineHeightPx
+    alignment = [string]$config.EditorFormatting.TextAlignment; lastLineAlignment = [string]$config.EditorFormatting.LastLineAlignment
+    bold = $false; italic = $false; underline = $false; strike = $false
+})
+$order = 5
 $blockSequence = 0
 $blockDirectory = Join-Path $outputRoot 'blocks'
 for ($index = 0; $index -lt 4; $index++) {
     Add-AtomicSegmentActions -Actions $actions -Order ([ref]$order) -Segment $segments[$index] -BlockDirectory $blockDirectory -Formatting $config.EditorFormatting -BlockSequence ([ref]$blockSequence)
     $role = @($config.ImageAutomation.Roles | Sort-Object Order)[$index]
-    $actions.Add([pscustomobject]@{ order = $order++; type = 'UploadImage'; path = (Join-Path (Join-Path $imageRoot 'optimized') ([string]$role.OutputFileName)); alignment = 'center'; displayWidth = [int]$config.ImageAutomation.EditorDisplayWidth })
+    $anchorId = ('NTE_IMAGE_{0:D2}' -f ($index + 1))
+    $actions.Add([pscustomobject]@{
+        order = $order++; type = 'InsertImageAnchor'; anchorId = $anchorId; text = ('[[' + $anchorId + ']]')
+        postcondition = [pscustomobject]@{ requireStandaloneParagraph = $true; requireUniqueExactText = $true; forbidVisibleAfterUpload = $true }
+    })
 }
 Add-AtomicSegmentActions -Actions $actions -Order ([ref]$order) -Segment $segments[4] -BlockDirectory $blockDirectory -Formatting $config.EditorFormatting -BlockSequence ([ref]$blockSequence)
 $actions.Add([pscustomobject]@{ order = $order++; type = 'SetTags'; values = @($tags) })
+for ($index = 3; $index -ge 0; $index--) {
+    $role = @($config.ImageAutomation.Roles | Sort-Object Order)[$index]
+    $anchorId = ('NTE_IMAGE_{0:D2}' -f ($index + 1))
+    $actions.Add([pscustomobject]@{
+        order = $order++; type = 'UploadImageAtAnchor'; anchorId = $anchorId; anchorText = ('[[' + $anchorId + ']]')
+        path = (Join-Path (Join-Path $imageRoot 'optimized') ([string]$role.OutputFileName)); alignment = 'center'
+        displayWidth = [int]$config.ImageAutomation.EditorDisplayWidth; documentOrder = ($index + 1)
+        requireServerUrl = 'https://blogfiles.pstatic.net/'; requirePriorImagesStable = $true
+    })
+}
+$expectedHeadings = @($actions | Where-Object type -eq 'InsertStandaloneHeading' | ForEach-Object { [string]$_.text })
+$expectedParagraphCount = @($actions | Where-Object type -eq 'PasteStandaloneParagraphBlock').Count
+$actions.Add([pscustomobject]@{
+    order = $order++; type = 'VerifyWholeEditor'; expectedHeadingTexts = @($expectedHeadings)
+    expectedHeadingCount = $expectedHeadings.Count; expectedParagraphCount = $expectedParagraphCount
+    requireStandaloneHeadings = $true; requireBodyBoldFalse = $true; requireCalloutBodyBoldFalse = $true
+    requireNativeBodyFont = [string]$config.EditorFormatting.BodyFontFamily
+    requireBodyFontSizePx = [int]$config.EditorFormatting.BodyFontSizePx
+    requireBodyLineHeightPx = [int]$config.EditorFormatting.BodyLineHeightPx
+    requireHeadingTopPx = [int]$config.EditorFormatting.SectionHeadingTopPx
+    requireHeadingBottomPx = [int]$config.EditorFormatting.SectionHeadingBottomPx
+    requireParagraphBottomPx = [int]$config.EditorFormatting.ParagraphBottomPx
+    rejectMergedHeadingBody = $true; rejectUnexpectedBoldParagraphs = $true
+})
 $actions.Add([pscustomobject]@{ order = $order++; type = 'StopBeforePublicationSettings' })
 Assert-AtomicEditorPlan -Actions @($actions.ToArray()) -Formatting $config.EditorFormatting
 
 $planPath = Join-Path $outputRoot '네이버편집계획.json'
 $plan = [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 3
     contentId = $ContentId
     sourceMode = 'GoogleAutomationCopy'
     reusedExistingNaverFeatures = @('ImagePlan','ImageOptimization','ImageValidation')

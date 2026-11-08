@@ -15,10 +15,13 @@ $requiredPaths = @(
     (Join-Path $googleRoot '프롬프트\01_소재_URL_프롬프트.md'),
     (Join-Path $googleRoot '프롬프트\02_최종_글쓰기_프롬프트.md'),
     (Join-Path $googleRoot '프롬프트\03_이미지_생성_프롬프트.md'),
-    $newArticlePath,$packagePath,
+    $newArticlePath,$packagePath,(Join-Path $PSScriptRoot '통합실행.ps1'),(Join-Path $PSScriptRoot '통합실행결과검증.ps1'),
     (Join-Path $PSScriptRoot '이미지작업준비.ps1'),
     (Join-Path $PSScriptRoot '이미지최적화.ps1'),
-    (Join-Path $PSScriptRoot '이미지검증.ps1')
+    (Join-Path $PSScriptRoot '이미지검증.ps1'),
+    (Join-Path $PSScriptRoot '크롬직접연결.ps1'),
+    (Join-Path $PSScriptRoot '크롬직접실행.mjs'),
+    (Join-Path $PSScriptRoot '크롬네이티브입력.ps1')
 )
 foreach ($path in $requiredPaths) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "필수 파일을 찾을 수 없습니다: $path" }
@@ -48,6 +51,17 @@ function Select-Folder([string]$Description) {
 function Show-Error([string]$Message) {
     [Windows.Forms.MessageBox]::Show($Message,'네이버 블로그 통합 자동화','OK','Error') | Out-Null
 }
+function Invoke-EditorPipeline($Package) {
+    $manifest=Join-Path $Package.outputRoot '실행패키지.json'
+    $completionMarker=Join-Path $Package.outputRoot '편집기입력완료.json'
+    if (Test-Path -LiteralPath $completionMarker -PathType Leaf) { throw '이 글은 이미 네이버 편집기에 입력·검증되었습니다. 중복 입력하지 않습니다.' }
+    $Package | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $manifest -Encoding UTF8
+    $result.Text='글 작성 자료 생성 완료. 이미지 생성·최적화·네이버 새 글 입력·실제 화면 검증을 실행합니다.'
+    $form.Refresh()
+    $verified = & (Join-Path $PSScriptRoot '통합실행.ps1') -PackagePath $manifest | ConvertFrom-Json
+    [pscustomobject]@{ completedAt=(Get-Date).ToString('o'); editorUrl=[string]$verified.editorUrl; measurementFile=[string]$verified.measurementFile } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $completionMarker -Encoding UTF8
+    $result.Text="새 글 편집창 입력 및 재검증 통과.`r`n주소: $($verified.editorUrl)`r`n발행 설정은 열지 않았습니다.`r`n검증 자료: $($verified.measurementFile)"
+}
 
 $form = New-Object Windows.Forms.Form
 $form.Text = '네이버 블로그 통합 자동화'
@@ -64,7 +78,7 @@ $title.Location = New-Object Drawing.Point(24,20)
 $form.Controls.Add($title)
 
 $notice = New-Object Windows.Forms.Label
-$notice.Text = 'Google 자동화 사본을 본체로 사용하고 기존 네이버 개발본에서는 이미지 기능만 사용합니다.'
+$notice.Text = '최근 7일 기사를 확인하고 사용자가 선택한 1~3건을 네이버 새 글로 준비합니다.'
 $notice.AutoSize = $true
 $notice.Location = New-Object Drawing.Point(27,60)
 $form.Controls.Add($notice)
@@ -92,64 +106,120 @@ $workBrowse.Location = New-Object Drawing.Point(690,128)
 $workBrowse.Size = New-Object Drawing.Size(100,32)
 $form.Controls.Add($workBrowse)
 
-$sourceLabel = New-Object Windows.Forms.Label
-$sourceLabel.Text = 'Google 완성 글'
-$sourceLabel.AutoSize = $true
-$sourceLabel.Location = New-Object Drawing.Point(27,180)
-$form.Controls.Add($sourceLabel)
-$sourceText = New-Object Windows.Forms.TextBox
-$sourceText.Location = New-Object Drawing.Point(130,175)
-$sourceText.Size = New-Object Drawing.Size(545,28)
-$form.Controls.Add($sourceText)
-$sourceBrowse = New-Object Windows.Forms.Button
-$sourceBrowse.Text = '찾아보기'
-$sourceBrowse.Location = New-Object Drawing.Point(690,173)
-$sourceBrowse.Size = New-Object Drawing.Size(100,32)
-$form.Controls.Add($sourceBrowse)
-
 $generateButton = New-Object Windows.Forms.Button
 $generateButton.Text = '최신 기사로 새 글 만들기'
-$generateButton.Location = New-Object Drawing.Point(25,225)
-$generateButton.Size = New-Object Drawing.Size(240,42)
+$generateButton.Location = New-Object Drawing.Point(25,180)
+$generateButton.Size = New-Object Drawing.Size(365,42)
 $form.Controls.Add($generateButton)
-$convertButton = New-Object Windows.Forms.Button
-$convertButton.Text = 'Google 완성 글 가져오기'
-$convertButton.Location = New-Object Drawing.Point(280,225)
-$convertButton.Size = New-Object Drawing.Size(240,42)
-$form.Controls.Add($convertButton)
+$resumeButton = New-Object Windows.Forms.Button
+$resumeButton.Text = '기존 작업 이어서 실행'
+$resumeButton.Location = New-Object Drawing.Point(410,180)
+$resumeButton.Size = New-Object Drawing.Size(365,42)
+$form.Controls.Add($resumeButton)
+$resumeButton.Add_Click({
+    $dialog=New-Object Windows.Forms.OpenFileDialog
+    $dialog.Filter='실행패키지.json|실행패키지.json'
+    $dialog.Title='이어서 실행할 네이버 작업 자료 선택'
+    try {
+        if($dialog.ShowDialog() -ne [Windows.Forms.DialogResult]::OK){return}
+        $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        $package=Get-Content -LiteralPath $dialog.FileName -Raw -Encoding UTF8 | ConvertFrom-Json
+        Invoke-EditorPipeline $package
+    } catch {$result.Text='미완료: '+$_.Exception.Message;Show-Error $_.Exception.Message}
+    finally {$generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($queueList.Items.Count -gt 0);$dialog.Dispose()}
+})
+
+$queueLabel = New-Object Windows.Forms.Label
+$queueLabel.Text = '준비된 글 — 원하는 글을 선택해 편집기에 한 건씩 입력'
+$queueLabel.AutoSize = $true
+$queueLabel.Location = New-Object Drawing.Point(27,238)
+$form.Controls.Add($queueLabel)
+$queueList = New-Object Windows.Forms.ListBox
+$queueList.Location = New-Object Drawing.Point(25,263)
+$queueList.Size = New-Object Drawing.Size(610,88)
+$queueList.DisplayMember = 'display'
+$form.Controls.Add($queueList)
+$queueRunButton = New-Object Windows.Forms.Button
+$queueRunButton.Text = '선택한 글 편집기에 넣기'
+$queueRunButton.Location = New-Object Drawing.Point(650,263)
+$queueRunButton.Size = New-Object Drawing.Size(140,88)
+$queueRunButton.Enabled = $false
+$form.Controls.Add($queueRunButton)
+$queueList.Add_SelectedIndexChanged({ $queueRunButton.Enabled = ($null -ne $queueList.SelectedItem) })
+$queueRunButton.Add_Click({
+    if ($null -eq $queueList.SelectedItem) { return }
+    $entry = $queueList.SelectedItem
+    try {
+        $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        Invoke-EditorPipeline $entry.package
+        $index = $queueList.SelectedIndex
+        $queueList.Items.RemoveAt($index)
+        if ($queueList.Items.Count -gt 0) { $queueList.SelectedIndex = [Math]::Min($index,$queueList.Items.Count-1) }
+    } catch { $result.Text='미완료: '+$_.Exception.Message;Show-Error $_.Exception.Message }
+    finally {$generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($queueList.Items.Count -gt 0)}
+})
 
 $resultLabel = New-Object Windows.Forms.Label
 $resultLabel.Text = '작업 결과'
 $resultLabel.AutoSize = $true
-$resultLabel.Location = New-Object Drawing.Point(27,292)
+$resultLabel.Location = New-Object Drawing.Point(27,410)
 $form.Controls.Add($resultLabel)
 $result = New-Object Windows.Forms.RichTextBox
-$result.Location = New-Object Drawing.Point(25,320)
-$result.Size = New-Object Drawing.Size(765,210)
+$result.Location = New-Object Drawing.Point(25,435)
+$result.Size = New-Object Drawing.Size(765,95)
 $result.ReadOnly = $true
 $result.BackColor = [Drawing.Color]::White
 $form.Controls.Add($result)
 
-$workBrowse.Add_Click({ $selected=Select-Folder '저장소 밖의 네이버 작업 폴더를 선택하세요.'; if($selected){$workText.Text=$selected} })
-$sourceBrowse.Add_Click({ $selected=Select-Folder 'Google 자동화가 만든 완성 글 폴더를 선택하세요.'; if($selected){$sourceText.Text=$selected} })
-$convertButton.Add_Click({
+$connectionButton = New-Object Windows.Forms.Button
+$connectionButton.Text = 'Chrome 연결만 검사 (글 변경 없음)'
+$connectionButton.Location = New-Object Drawing.Point(25,365)
+$connectionButton.Size = New-Object Drawing.Size(370,34)
+$form.Controls.Add($connectionButton)
+$connectionButton.Add_Click({
     try {
-        if ([string]::IsNullOrWhiteSpace($sourceText.Text)) { throw 'Google 완성 글 폴더를 선택하세요.' }
-        $output = & $packagePath -SourceArticlePath $sourceText.Text -WorkRoot $workText.Text | ConvertFrom-Json
-        $result.Text = "네이버 편집 패키지를 만들었습니다.`r`n제목: $($output.title)`r`n이미지: $($output.imageCount)장`r`n입력 구간: $($output.segmentCount)개`r`n편집 계획: $($output.editorPlan)`r`n컴퓨터 사용 실행 계약: $($output.executionContract)`r`n실행 상태: 실행 전(완료 아님)`r`n`r`n기존 글과 발행 설정은 건드리지 않습니다."
-    } catch { Show-Error $_.Exception.Message }
+        $connectionButton.Enabled = $false
+        $result.Text = '자동화 전용 Chrome을 열고 직접 연결을 검사합니다. ChatGPT 대화는 사용하지 않습니다.'
+        $form.Refresh()
+        $run=Join-Path $workText.Text ('connection-'+[guid]::NewGuid().ToString())
+        $receipt=& (Join-Path $PSScriptRoot '크롬직접연결.ps1') -RunDirectory $run -ConnectionTestOnly|ConvertFrom-Json
+        if($receipt.status -ne 'Ready'){throw ([string]$receipt.reason)}
+        $result.Text="Chrome 직접 연결 검사 통과`r`n주소: $($receipt.url)`r`nChatGPT 영문 요청 없음`r`n글 작성·수정·발행 없음"
+    } catch {
+        $connectionButton.Enabled = $true
+        $result.Text = '연결 요청 실패: ' + $_.Exception.Message
+    } finally {$connectionButton.Enabled=$true}
 })
+
+$workBrowse.Add_Click({ $selected=Select-Folder '저장소 밖의 네이버 작업 폴더를 선택하세요.'; if($selected){$workText.Text=$selected} })
 $generateButton.Add_Click({
     try {
-        $result.Text='Google 기반 기사 수집·선정·사실검증·글 생성을 실행하고 있습니다.';$form.Refresh()
-        $output = & $newArticlePath -WorkRoot $workText.Text | ConvertFrom-Json
-        $result.Text = "새 네이버 편집 패키지를 만들었습니다.`r`n제목: $($output.title)`r`n이미지: $($output.imageCount)장`r`n편집 계획: $($output.editorPlan)`r`n컴퓨터 사용 실행 계약: $($output.executionContract)`r`n실행 상태: 실행 전(완료 아님)`r`n`r`n원자 동작 실행과 PC·모바일 검증 후에만 완료로 판정합니다."
-    } catch { Show-Error $_.Exception.Message }
+        $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        $result.Text='최근 7일 기사 수집 후 PowerShell에서 선택한 1~3건을 작성합니다.';$form.Refresh()
+        $generated = & $newArticlePath -WorkRoot $workText.Text | ConvertFrom-Json
+        $packages = @($generated.packages)
+        if ($packages.Count -lt 1 -or $packages.Count -gt 3) { throw '이번 작업에서 준비된 글 수가 1~3건이 아닙니다.' }
+        $queueList.Items.Clear()
+        $order = 0
+        foreach ($package in $packages) {
+            $order++
+            $entry = [pscustomobject]@{ display = ('{0}/{1} | {2}' -f $order,$packages.Count,[string]$package.title); package = $package }
+            [void]$queueList.Items.Add($entry)
+        }
+        $queueList.SelectedIndex = 0
+        if ($packages.Count -eq 1) {
+            Invoke-EditorPipeline $packages[0]
+            $queueList.Items.Clear()
+        } else {
+            $result.Text = ("{0}건의 글 준비 완료. 목록에서 원하는 글부터 편집기에 넣으세요.`r`n발행 설정은 열지 않습니다." -f $packages.Count)
+        }
+    } catch { $result.Text='미완료: '+$_.Exception.Message; Show-Error $_.Exception.Message }
+    finally { $generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($queueList.Items.Count -gt 0) }
 })
 
 if ($LayoutSelfTest) {
     $form.PerformLayout()
-    foreach($control in @($title,$notice,$stopNotice,$workLabel,$workText,$workBrowse,$sourceLabel,$sourceText,$sourceBrowse,$generateButton,$convertButton,$resultLabel,$result)) {
+    foreach($control in @($title,$notice,$stopNotice,$workLabel,$workText,$workBrowse,$generateButton,$resumeButton,$queueLabel,$queueList,$queueRunButton,$connectionButton,$resultLabel,$result)) {
         if(-not $form.ClientRectangle.Contains($control.Bounds)){throw "화면 요소가 창을 벗어났습니다: $($control.Text)"}
     }
     $form.Dispose();Write-Output 'Naver integrated automation layout self-test passed.';return

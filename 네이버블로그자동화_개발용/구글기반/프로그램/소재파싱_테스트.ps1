@@ -58,7 +58,13 @@ $display=Format-CandidateList $parsed
 Assert ([regex]::Matches($display,"`n`n").Count -eq 1 -and $display -notmatch "`n{3}") '소재 사이 빈 줄 정확히 1줄'
 Assert (@(Get-Selection '1' $parsed).Count -eq 1) '단일 번호 선택'
 Assert (@(Get-Selection '1,2' $parsed).Count -eq 2) '복수 번호 선택'
+Assert ((@(Get-Selection '2,1' $parsed) | ForEach-Object Number) -join ',' -eq '2,1') '사용자 입력 순서 보존'
 Assert (@(Get-Selection '2,2' $parsed).Count -eq 1) '선택 번호 중복 제거'
+Assert (@(Get-Selection '1 2' $parsed).Count -eq 2) '공백 번호 입력 허용'
+$fourCandidates = @(1..4 | ForEach-Object { [pscustomobject]@{Number=$_;Title="후보 $_"} })
+$tooManyRejected=$false
+try { $null=Get-Selection '1,2,3,4' $fourCandidates } catch { $tooManyRejected=$_.Exception.Message -match '1개부터 3개' }
+Assert $tooManyRejected '4개 이상 선택 차단'
 foreach($badSelection in @('3','1,9','abc')) {
     $rejected=$false
     try { $null=Get-Selection $badSelection $parsed } catch { $rejected=$true }

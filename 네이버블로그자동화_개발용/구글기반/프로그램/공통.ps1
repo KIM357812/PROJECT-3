@@ -134,6 +134,8 @@ function Format-CandidateList([object[]]$candidates) {
 function Resolve-SelectionInput([string]$inputText) {
     $original = if ($null -eq $inputText) { '' } else { $inputText }
     $normalized = $original.Trim() -replace '[;；，、]', ','
+    $normalized = $normalized -replace '\s+', ','
+    $normalized = $normalized -replace ',+', ','
     $normalized = $normalized.TrimEnd(' ', ',', '.', ':')
     if ($normalized -match '^\d+(\s*,\s*\d+)*$') {
         return [PSCustomObject]@{ Selection=$normalized; RemovedText='' }
@@ -147,16 +149,22 @@ function Resolve-SelectionInput([string]$inputText) {
 function Get-Selection([string]$inputText, [object[]]$candidates) {
     $resolved = Resolve-SelectionInput $inputText
     $numbers = @($resolved.Selection -split ',' | ForEach-Object { [int]$_.Trim() } | Select-Object -Unique)
-    $selected = @($candidates | Where-Object { $numbers -contains $_.Number })
-    if ($selected.Count -ne $numbers.Count) { throw '목록에 없는 번호가 포함되어 있습니다.' }
-    return $selected
+    if ($numbers.Count -lt 1 -or $numbers.Count -gt 3) { throw '작성할 기사 번호는 1개부터 3개까지만 선택할 수 있습니다.' }
+    $lookup = @{}
+    foreach ($candidate in $candidates) { $lookup[[int]$candidate.Number] = $candidate }
+    $selected = New-Object System.Collections.ArrayList
+    foreach ($number in $numbers) {
+        if (-not $lookup.ContainsKey($number)) { throw '목록에 없는 번호가 포함되어 있습니다.' }
+        [void]$selected.Add($lookup[$number])
+    }
+    return @($selected.ToArray())
 }
 
 function Read-CandidateSelection([object[]]$candidates) {
     while ($true) {
-        $inputText = Read-Host '작성할 번호를 입력하세요 (예: 1 또는 2,4,7 / 취소: 취소)'
+        $inputText = Read-Host '작성할 기사 번호 1~3개를 입력하세요 (예: 1 또는 2,4,7 / 취소: Q)'
         if ($null -eq $inputText) { throw '번호 입력이 종료되었습니다.' }
-        if ($inputText.Trim() -in @('취소','종료')) { return @() }
+        if ($inputText.Trim() -in @('q','Q','취소','종료')) { return @() }
         try {
             $resolved = Resolve-SelectionInput $inputText
             if ($resolved.RemovedText) {
@@ -473,7 +481,9 @@ function Invoke-Codex([string]$prompt, [string]$outputPath) {
     if ([IO.File]::Exists($outputPath)) { throw "기존 응답 파일을 덮어쓸 수 없습니다: $outputPath" }
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $command.Source
-    $psi.Arguments = 'exec --model ' + $script:CodexModel + ' --skip-git-repo-check --sandbox read-only -C "' + $script:Root + '" -o "' + $outputPath + '" -'
+    # Naver uses the CLI's configured account/model instead of a hard-coded model ID.
+    $modelArgument = if ($env:NAVER_AUTOMATION_RUNTIME_ROOT) { '' } else { ' --model ' + $script:CodexModel }
+    $psi.Arguments = 'exec' + $modelArgument + ' --skip-git-repo-check --sandbox read-only -C "' + $script:Root + '" -o "' + $outputPath + '" -'
     $psi.WorkingDirectory = $script:Root
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true

@@ -177,7 +177,7 @@ function Invoke-SiteCollect([hashtable]$site,[datetime]$today) {
         if (-not $item.Url -or -not (Test-ArticleHost $item.Url $site.Host) -or -not $seen.Add($item.Url)) { continue }
         if ($item.Date) {
             $age = ($today.Date - ([datetime]::ParseExact($item.Date,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)).Date).Days
-            if ($age -lt 0 -or $age -gt 30) { continue }
+            if ($age -lt 0 -or $age -gt 7) { continue }
         }
         [void]$clean.Add([pscustomobject]@{Site=$site.Name;Url=$item.Url;Title=$item.Title;Date=$(if($item.Date){$item.Date}else{'게시일 확인 불가'});Source=$item.Source})
         if ($clean.Count -ge 10) { break }

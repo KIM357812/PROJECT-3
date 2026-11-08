@@ -1,6 +1,5 @@
 ﻿param([switch]$NoWatcher,[switch]$CandidatePreview,[switch]$CachedOnly,[string]$SearchResponsePath,[switch]$AutoStart,[switch]$ImageStatusOnly,[switch]$PreflightOnly,[switch]$RetryLatest)
 $ErrorActionPreference = 'Stop'
-$autoSelectTop = if ($env:NAVER_AUTOMATION_AUTO_SELECT_TOP) { [int]$env:NAVER_AUTOMATION_AUTO_SELECT_TOP } else { 0 }
 . (Join-Path $PSScriptRoot '공통.ps1')
 . (Join-Path $PSScriptRoot '후보준비.ps1')
 
@@ -59,7 +58,6 @@ function Start-Workflow {
     $state = [pscustomobject]@{ Version=1; Status='소재 검색 중'; CreatedAt=(Get-Date).ToString('o'); UpdatedAt=(Get-Date).ToString('o'); Candidates=@(); SelectedNumbers=@(); Completed=@(); Failed=@() }
     Save-RunState $run $state
     $searchPrompt = [IO.File]::ReadAllText((Join-Path $script:PromptDir '01_소재_URL_프롬프트.md'),[Text.Encoding]::UTF8)
-    $searchPrompt = $searchPrompt.TrimEnd()+"`n`n"+(Format-ExistingPostContext @(Get-ExistingPosts))+"`n"
     Write-Host '최신 소재를 찾고 있습니다. 잠시 기다려 주세요.'
     try {
         try {
@@ -81,11 +79,7 @@ function Start-Workflow {
         $state.Candidates=$candidates; $state.Status='소재 선택 대기'; Save-RunState $run $state
         Write-Host (Format-CandidateList $candidates)
         if ($CandidatePreview) { Write-Host ('소재 목록 시험 성공: {0}건. 기록: {1}' -f $candidates.Count,$run); return }
-        $selected = if ($autoSelectTop -gt 0) {
-            @($candidates | Select-Object -First $autoSelectTop)
-        } else {
-            @(Read-CandidateSelection $candidates)
-        }
+        $selected = @(Read-CandidateSelection $candidates)
         if (-not $selected.Count) { $state.Status='사용자 취소'; Save-RunState $run $state; return }
         $state.SelectedNumbers=@($selected|ForEach-Object Number); $state.Status='글 작성 중'; Save-RunState $run $state
         Invoke-SelectedArticles $run $selected $state

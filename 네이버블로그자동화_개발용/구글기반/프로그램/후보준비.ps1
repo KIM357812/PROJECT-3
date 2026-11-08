@@ -1,7 +1,7 @@
 ﻿. (Join-Path $PSScriptRoot '후보수집.ps1')
 
-$script:CandidateLog = Join-Path $script:Root '기록\후보수집_로그.txt'
-$script:UsedUrlPath = Join-Path $script:Root '기록\작성한_URL.txt'
+$script:CandidateLog = Join-Path $script:RuntimeRoot '기록\후보수집_로그.txt'
+$script:UsedUrlPath = Join-Path $script:RuntimeRoot '기록\작성한_URL.txt'
 
 function Get-UsedUrls {
     $used = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -39,7 +39,7 @@ function Write-CandidateLog([object[]]$results,[bool]$cached) {
 
 function Get-LocalCandidates([switch]$Refresh, [switch]$CachedOnly) {
     $today = Get-Date
-    $cachePath = Join-Path $script:Root ('기록\후보목록_{0}.json' -f $today.ToString('yyyy-MM-dd'))
+    $cachePath = Join-Path $script:RuntimeRoot ('기록\후보목록_{0}.json' -f $today.ToString('yyyy-MM-dd'))
     $cached = $false
     $results = @()
     $previous = @()
@@ -103,7 +103,6 @@ function Get-LocalCandidates([switch]$Refresh, [switch]$CachedOnly) {
         }
     }
     Write-CandidateLog $results $cached
-    $used = Get-UsedUrls
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $candidates = New-Object System.Collections.ArrayList
     foreach ($result in $results) {
@@ -111,7 +110,7 @@ function Get-LocalCandidates([switch]$Refresh, [switch]$CachedOnly) {
         if (-not $definition.Count) { continue }
         foreach ($item in @($result.Candidates)) {
             $url = Normalize-ArticleUrl $item.Url 'https://example.com'
-            if ($url -and (Test-ArticleHost $url $definition[0].Host) -and -not $used.Contains($url) -and $seen.Add($url)) { [void]$candidates.Add($item) }
+            if ($url -and (Test-ArticleHost $url $definition[0].Host) -and $seen.Add($url)) { [void]$candidates.Add($item) }
         }
     }
     return [pscustomobject]@{ Cached=$cached; Results=@($results); Candidates=@($candidates.ToArray()); CachePath=$cachePath }
@@ -119,17 +118,14 @@ function Get-LocalCandidates([switch]$Refresh, [switch]$CachedOnly) {
 
 function New-CandidateSearchPrompt([string]$basePrompt,[object]$prepared) {
     $lines = New-Object System.Collections.Generic.List[string]
-    $used = Get-UsedUrls
     if (-not $prepared -or @($prepared.Candidates).Count -eq 0) {
         $lines.Add('공개 자료 후보가 없어 기존 웹 검색으로 부족한 소재를 찾으십시오.')
-        foreach ($url in $used) { $lines.Add('이미 작성한 URL: '+$url) }
         return $basePrompt.TrimEnd()+"`n`n"+($lines -join "`n")+"`n"
     }
     $lines.Add('')
     $lines.Add('## Windows PC가 먼저 수집한 후보 — 이 목록을 우선 검증')
-    $lines.Add('다음 URL은 공개 피드·사이트맵·최신 페이지에서 수집한 미검증 후보입니다. 각 기사 원문을 직접 확인한 뒤 적합한 것만 선정하세요. 게시일 확인 불가는 원문에서 날짜를 확인하고 7→20→30일 범위를 적용하세요.')
-    $lines.Add('후보에서 사이트별 2건을 확보하지 못할 때에만 해당 사이트의 부족한 수량을 기존 웹 검색으로 보충하세요. 작성한 URL 목록에 있는 URL은 사용하지 마세요.')
-    foreach ($url in $used) { $lines.Add('이미 작성한 URL: '+$url) }
+    $lines.Add('다음 URL은 공개 피드·사이트맵·최신 페이지에서 수집한 미검증 후보입니다. 각 기사 원문을 직접 확인하고 게시일이 실행일 기준 최근 7일 이내인 기사만 선정하세요. 게시일을 확인할 수 없는 기사는 제외하세요.')
+    $lines.Add('후보에서 사이트별 2건을 확보하지 못하면 기간을 늘리지 말고 해당 사이트의 최신 페이지·공개 피드·사이트맵·내부 검색·분야별 검색어 순으로 다시 찾으세요. 이전 작성 여부는 후보 제외 조건이 아닙니다.')
     foreach ($source in $script:Sources) {
         $siteItems = @($prepared.Candidates | Where-Object Site -eq $source.Name)
         $lines.Add(('### {0} — 후보 {1}건' -f $source.Name,$siteItems.Count))
@@ -139,20 +135,18 @@ function New-CandidateSearchPrompt([string]$basePrompt,[object]$prepared) {
 }
 
 function Select-ValidCandidates([object[]]$candidates) {
-    $used = Get-UsedUrls
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $counts = @{}
     $accepted = New-Object System.Collections.ArrayList
     foreach ($candidate in $candidates) {
         $url = Normalize-ArticleUrl $candidate.Url 'https://example.com'
-        if (-not $url -or $used.Contains($url) -or -not $seen.Add($url)) { continue }
+        if (-not $url -or -not $seen.Add($url)) { continue }
         if (-not $counts.ContainsKey($candidate.Site)) { $counts[$candidate.Site] = 0 }
         if ($counts[$candidate.Site] -ge $script:MaximumCandidatesPerSite) { continue }
-        if ($candidate.Date -ne '게시일 확인 불가') {
-            try { $age = ((Get-Date).Date - [datetime]::ParseExact($candidate.Date,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture).Date).Days }
-            catch { continue }
-            if ($age -lt 0 -or $age -gt 30) { continue }
-        }
+        if ($candidate.Date -eq '게시일 확인 불가') { continue }
+        try { $age = ((Get-Date).Date - [datetime]::ParseExact($candidate.Date,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture).Date).Days }
+        catch { continue }
+        if ($age -lt 0 -or $age -gt 7) { continue }
         # 중복 비교에는 정규화 주소를 쓰고 화면에는 원문에서 확인한 최종 주소를 보존합니다.
         $candidate.Url = ([uri]$candidate.Url).AbsoluteUri
         [void]$accepted.Add($candidate)
