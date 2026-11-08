@@ -3,7 +3,8 @@
 param(
     [string]$PackagePath,
     [Parameter(Mandatory=$true)][string]$RunDirectory,
-    [switch]$ConnectionTestOnly
+    [switch]$ConnectionTestOnly,
+    [switch]$AllowTagOnlyPublicationSettings
 )
 $ErrorActionPreference='Stop'
 
@@ -63,6 +64,7 @@ $node=(Get-Command node -ErrorAction Stop).Source
 $runner=Join-Path $PSScriptRoot '크롬직접실행.mjs'
 $resultPath=Join-Path $RunDirectory $(if($ConnectionTestOnly){'browser-preflight.json'}else{'result.json'})
 $args=@($runner,'--mode',$(if($ConnectionTestOnly){'preflight'}else{'execute'}),'--port',[string]$port,'--package',$(if($PackagePath){$PackagePath}else{'-'}),'--run-dir',$RunDirectory,'--result',$resultPath,'--blog-id',[string]$config.Naver.BlogId,'--blog-url',[string]$config.Naver.BlogUrl,'--write-url',[string]$config.Naver.WriteUrl)
+if($AllowTagOnlyPublicationSettings){$args+=@('--allow-tag-only-publication-settings','true')}
 & $node @args
 if($LASTEXITCODE -ne 0){throw "CHROME_DIRECT_RUNNER_FAILED: 종료 코드 $LASTEXITCODE"}
 if(-not(Test-Path -LiteralPath $resultPath -PathType Leaf)){throw 'CHROME_DIRECT_RESULT_MISSING'}

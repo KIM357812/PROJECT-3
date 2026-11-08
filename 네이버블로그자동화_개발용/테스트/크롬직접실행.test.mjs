@@ -49,3 +49,7 @@ test('image actions must use only manifest optimized files in document order',()
   const screenshot={actions:good.actions.map((a,i)=>({...a,path:`C:\\temp\\pc${i}.png`}))};
   assert.throws(()=>validatePlannedImagePaths(screenshot,manifest),/IMAGE_PLAN_PATH_MISMATCH/);
 });
+test('tag-only execution requires an explicit opt-in argument',()=>{
+  const args=parseArgs(['--mode','execute','--allow-tag-only-publication-settings','true']);
+  assert.equal(args['allow-tag-only-publication-settings'],'true');
+});

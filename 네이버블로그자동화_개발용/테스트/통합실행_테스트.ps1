@@ -11,6 +11,7 @@ try {
     $directRunnerText = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../프로그램/크롬직접실행.mjs') -Raw -Encoding UTF8
     foreach($requiredInstruction in @(
         '크롬네이티브입력.ps1','nativePaste','body-all',
+        "document.querySelector('#tag-input')?.value",'Input.dispatchKeyEvent',
         'Page.setInterceptFileChooserDialog','DOM.setFileInputFiles',
         'blogfiles\.pstatic\.net','se-section-align-center',
         'displayWidth||400','publicationSettingsOpened:false','published:false'
@@ -62,6 +63,15 @@ try {
     foreach($n in @('pcScreenshot','mobileScreenshot')){$p=Join-Path $root $n;'fixture'|Set-Content $p;$r|Add-Member $n $p}
     $r|Add-Member measurementFile $measurementPath
     Assert-NaverRunResult $r 'test' $root $planPath
+    $r|Add-Member publicationSettingsEverOpenedForTags $true
+    $r|Add-Member publicationSettingsPurpose 'TagsOnly'
+    $r|Add-Member visibilityChanged $false
+    $r|Add-Member scheduleChanged $false
+    $r|Add-Member publishButtonClicked $false
+    Assert-NaverRunResult $r 'test' $root $planPath $true
+    $r.publishButtonClicked=$true;$rejected=$false
+    try{Assert-NaverRunResult $r 'test' $root $planPath $true}catch{$rejected=$true}
+    if(-not $rejected){throw '태그 전용 실행의 발행 클릭 차단 실패'};$r.publishButtonClicked=$false
     foreach($n in @('imagesGenerated','imagesOptimized','imagesUploaded','titleVerified','bodyVerified','linksVerified','tagsVerified','formatVerified','mobileVerified','secondPassVerified')) {
         $r.$n=$false;$rejected=$false
         try {Assert-NaverRunResult $r 'test' $root $planPath}catch{$rejected=$true}

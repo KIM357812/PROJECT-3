@@ -189,6 +189,79 @@ async function clickIfVisible(cdp,sessionId,contextId,selector){
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:rect.x,y:rect.y,button:'left',clickCount:1},sessionId);
   return true;
 }
+async function findPublicationContext(cdp,attached,timeout=10000){
+  const end=Date.now()+timeout;
+  while(Date.now()<end){
+    for(const [id] of attached.contexts){
+      try{
+        const found=await evaluate(cdp,attached.sessionId,`(()=>{const e=document.querySelector('#tag-input');return e&&e.offsetParent?{url:location.href}:null})()`,id);
+        if(found)return {contextId:id,...found};
+      }catch{}
+    }
+    await sleep(200);
+  }
+  throw new Error('TAG_INPUT_NOT_FOUND_IN_PUBLICATION_SETTINGS');
+}
+async function readPublicationState(cdp,attached,contextId){
+  return evaluate(cdp,attached.sessionId,`(()=>({
+    openType:document.querySelector('input[name="open_type"]:checked')?.value||'',
+    radioTime:document.querySelector('input[name="radio_time"]:checked')?.value||'',
+    options:[...document.querySelectorAll('input[type="checkbox"]')].filter(e=>e.id).map(e=>({id:e.id,checked:e.checked})).sort((a,b)=>a.id.localeCompare(b.id)),
+    tagInputVisible:!!document.querySelector('#tag-input')?.offsetParent,
+    finalPublishVisible:!!document.querySelector('button[data-testid="seOnePublishBtn"]')?.offsetParent
+  }))()`,contextId);
+}
+function samePublicationState(before,after){
+  return before.openType===after.openType&&before.radioTime===after.radioTime&&JSON.stringify(before.options)===JSON.stringify(after.options);
+}
+async function applyTagsOnly(cdp,attached,editorContextId,tags,runDir){
+  const planned=[...new Set((tags??[]).map(x=>String(x).trim()).filter(Boolean))];
+  if(planned.length<5||planned.length>10)throw new Error('TAG_COUNT_OUT_OF_RANGE');
+  await clickVisible(cdp,attached.sessionId,editorContextId,'button[data-click-area="tpb.publish"]');
+  const publication=await findPublicationContext(cdp,attached);
+  const before=await readPublicationState(cdp,attached,publication.contextId);
+  for(let i=0;i<planned.length;i++){
+    const tag=planned[i];
+    const expected=JSON.stringify(tag);
+    await evaluate(cdp,attached.sessionId,`(()=>{const e=document.querySelector('#tag-input');if(!e||!e.offsetParent)return false;const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(e,${expected});e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:${expected}}));return true})()`,publication.contextId);
+    await waitFor(cdp,attached.sessionId,`document.querySelector('#tag-input')?.value===${expected}`,{contextId:publication.contextId,timeout:5000});
+    await evaluate(cdp,attached.sessionId,`(()=>{const e=document.querySelector('#tag-input');if(!e)return false;e.focus();return document.activeElement===e})()`,publication.contextId);
+    await waitFor(cdp,attached.sessionId,`document.activeElement===document.querySelector('#tag-input')`,{contextId:publication.contextId,timeout:5000});
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13},attached.sessionId);
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13},attached.sessionId);
+    await waitFor(cdp,attached.sessionId,`(()=>{const n=s=>String(s||'').replace(/^#/,'').replace(/\\s+/g,' ').trim();return [...document.querySelectorAll('[class*="tag"],li,span')].some(e=>e.offsetParent&&n(e.textContent)===n(${expected}))})()`,{contextId:publication.contextId,timeout:5000});
+  }
+  const observed=await evaluate(cdp,attached.sessionId,`(()=>{const expected=${JSON.stringify(planned)};const n=s=>String(s||'').replace(/^#/,'').replace(/\\s+/g,' ').trim();return expected.filter(tag=>[...document.querySelectorAll('[class*="tag"],li,span')].some(e=>e.offsetParent&&n(e.textContent)===n(tag)))})()`,publication.contextId);
+  const after=await readPublicationState(cdp,attached,publication.contextId);
+  if(!samePublicationState(before,after))throw new Error('PUBLICATION_OPTIONS_CHANGED_DURING_TAG_ENTRY');
+  if(observed.length!==planned.length||observed.some((x,i)=>x!==planned[i]))throw new Error('TAG_VERIFICATION_FAILED');
+  if(!after.finalPublishVisible)throw new Error('PUBLICATION_PANEL_STATE_UNKNOWN');
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
+  await waitFor(cdp,attached.sessionId,`!document.querySelector('button[data-testid="seOnePublishBtn"]')?.offsetParent`,{contextId:publication.contextId,timeout:5000});
+  return {tags:observed,publicationSettingsEverOpenedForTags:true,publicationSettingsOpenedAtStop:false,publicationSettingsPurpose:'TagsOnly',visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false};
+}
+async function cleanEditorView(cdp,attached,contextId){
+  await evaluate(cdp,attached.sessionId,`(()=>{document.querySelector('.se-sidebar-close-button')?.click();getSelection()?.removeAllRanges();document.activeElement?.blur?.();window.scrollTo(0,0);for(const e of [document.scrollingElement,document.documentElement,document.body,...document.querySelectorAll('*')]){if(!e)continue;if(e.scrollTop>0)e.scrollTop=0;if(e.scrollLeft>0)e.scrollLeft=0}return true})()`,contextId).catch(()=>{});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:8,y:300},attached.sessionId);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:8,y:300,button:'left',clickCount:1},attached.sessionId);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:8,y:300,button:'left',clickCount:1},attached.sessionId);
+  for(let i=0;i<2;i++){
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
+  }
+  await evaluate(cdp,attached.sessionId,`(()=>{window.scrollTo(0,0);for(const e of [document.scrollingElement,document.documentElement,document.body,...document.querySelectorAll('*')]){if(!e)continue;if(e.scrollTop>0)e.scrollTop=0;if(e.scrollLeft>0)e.scrollLeft=0}return true})()`,contextId).catch(()=>{});
+  await sleep(400);
+}
+async function inspectImagesSequentially(cdp,attached,contextId,count){
+  const images=[];
+  for(let index=0;index<count;index++){
+    await evaluate(cdp,attached.sessionId,`(()=>{const e=document.querySelectorAll('img.se-image-resource')[${index}];if(!e)return false;e.scrollIntoView({block:'center',inline:'center'});return true})()`,contextId);
+    const image=await waitFor(cdp,attached.sessionId,`(()=>{const e=document.querySelectorAll('img.se-image-resource')[${index}];if(!e||!/^https:\\/\\/blogfiles\\.pstatic\\.net\\//.test(e.src))return null;const r=e.getBoundingClientRect();const c=(e.closest('.se-section-image,.se-component-content')||e.parentElement).getBoundingClientRect();return{src:e.src,name:e.getAttribute('data-file-name')||e.alt||'',width:r.width,height:r.height,centered:Math.abs((r.left+r.width/2)-(c.left+c.width/2))<=2}})()`,{contextId,timeout:10000});
+    images.push(image);
+  }
+  return images;
+}
 async function uploadImageAtAnchor(cdp,attached,contextId,action,runDir){
   if(!fs.existsSync(action.path)) throw new Error(`IMAGE_FILE_MISSING:${action.path}`);
   await nativeSelectExactParagraph(cdp,attached.sessionId,contextId,action.anchorText,runDir,`anchor-${action.anchorId}`);
@@ -260,6 +333,7 @@ async function inspectEditableDom(cdp,attached){
       value.imageComponents=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('img.se-image-resource')].map(i=>(i.closest('.se-component')||i.parentElement).outerHTML.slice(0,5000))`,id);
       value.frameRects=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('iframe')].map(f=>{const r=f.getBoundingClientRect();return{id:f.id,name:f.name,x:r.x,y:r.y,width:r.width,height:r.height}})`,id);
       value.selection=await evaluate(cdp,attached.sessionId,`(()=>{const s=getSelection();const n=s?.anchorNode;const e=n?.nodeType===1?n:n?.parentElement;return{rangeCount:s?.rangeCount||0,text:s?.toString()||'',anchorTag:e?.tagName||'',anchorId:e?.id||'',anchorClass:e?.className||'',anchorText:e?.textContent?.slice(0,120)||''}})()`,id);
+      value.tagDiagnostics=await evaluate(cdp,attached.sessionId,`(()=>{const e=document.querySelector('#tag-input');if(!e)return null;const keys=Object.keys(e);const propsKey=keys.find(k=>k.startsWith('__reactProps$'));const props=propsKey?e[propsKey]:null;return{value:e.value,focused:document.activeElement===e,keys,propsKey,propNames:props?Object.keys(props):[],onChange:String(props?.onChange||'').slice(0,1000),onKeyDown:String(props?.onKeyDown||'').slice(0,1000),parentHtml:e.parentElement?.parentElement?.outerHTML?.slice(0,8000)||''}})()`,id);
       rows.push({contextId:id,contextName:context?.name||'',...value});
     }catch{}
   }
@@ -285,6 +359,14 @@ async function main(){
       if(!editorTarget){atomicWrite(a.result,{status:'Failed',reason:'EDITOR_TARGET_NOT_FOUND'});return}
       const attached=await attach(cdp,editorTarget.targetId);
       await sleep(1000);
+      if(a['open-publication-settings']){
+        let clicked=false;
+        for(const ctx of [...attached.contexts.values()].sort((x,y)=>y.id-x.id)){
+          try{if(await evaluate(cdp,attached.sessionId,`(()=>{const b=document.querySelector('button[data-click-area="tpb.publish"],button[class*="publish_btn"]');if(!b)return false;b.click();return true})()`,ctx.id)){clicked=true;break}}catch{}
+        }
+        if(!clicked) throw new Error('PUBLICATION_SETTINGS_BUTTON_NOT_FOUND');
+        await sleep(800);
+      }
       if(a['select-last-image']){
         const editorContext=await findEditorContext(cdp,attached,5000);
         const rect=await evaluate(cdp,attached.sessionId,`(()=>{const images=[...document.querySelectorAll('img.se-image-resource')];const e=images.at(-1);if(!e)return null;e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`,editorContext.contextId);
@@ -315,6 +397,7 @@ async function main(){
     await cdp.send('Target.activateTarget',{targetId:created.targetId});
     await sleep(600);
     const prepared=await prepareEditor(cdp,attached,context.contextId,plan);
+    await cleanEditorView(cdp,attached,context.contextId);
     const observed=await inspectEditor(cdp,attached,context.contextId,plan);
     const pc=path.join(a['run-dir'],'pc.png');await capture(cdp,attached.sessionId,pc);
     await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true},attached.sessionId);await sleep(500);
@@ -327,7 +410,29 @@ async function main(){
     const imageFileNames=uploaded.map(i=>path.basename(i.sourcePath));const imageServerUrls=uploaded.map(i=>i.src);
     const m={schemaVersion:1,measurementSource:'RenderedNaverDomAndScreen',pc:{horizontalOverflow:!!observed.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:pcImages.map(i=>i.width),imagesCentered:pcImages.map(i=>i.centered),rawUrlVisible:!!observed.body?.rawUrlVisible,sourceLinks:observed.body?.links||[]},mobile:{horizontalOverflow:!!mobileObserved.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:mobileImages.map(i=>i.width),imagesCentered:mobileImages.map(i=>i.centered),rawUrlVisible:!!mobileObserved.body?.rawUrlVisible},secondPass:{wholeArticleFromStart:true,titleVerified:normalizeText(observed.title)===normalizeText(plan.title),bodyVerified:!!observed.body?.text,headingsVerified:observed.headingsVerified,imagesVerified,linksVerified:(observed.body?.links?.length||0)>0}};
     atomicWrite(measurement,m);
-    atomicWrite(a.result,{status:'Blocked',reason:'CONTENT_AND_IMAGES_VERIFIED_TAGS_REQUIRE_PUBLICATION_SETTINGS',editorUrl:outer,publicationSettingsOpened:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:false,formatVerified:m.secondPass.headingsVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:false,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement});
+    if(a['allow-tag-only-publication-settings']!=='true'){
+      atomicWrite(a.result,{status:'Blocked',reason:'CONTENT_AND_IMAGES_VERIFIED_TAGS_REQUIRE_EXPLICIT_SETTINGS_APPROVAL',editorUrl:outer,publicationSettingsOpened:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:false,formatVerified:m.secondPass.headingsVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:false,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement});
+      return;
+    }
+    await cdp.send('Target.activateTarget',{targetId:created.targetId});
+    const tagEvidence=await applyTagsOnly(cdp,attached,context.contextId,plan.tags,plan.runDir);
+    const finalServerImages=await inspectImagesSequentially(cdp,attached,context.contextId,prepared.imageUploadCount);
+    await cleanEditorView(cdp,attached,context.contextId);
+    const finalObserved=await inspectEditor(cdp,attached,context.contextId,plan);
+    await capture(cdp,attached.sessionId,pc);
+    await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true},attached.sessionId);await cleanEditorView(cdp,attached,context.contextId);
+    const finalMobileObserved=await inspectEditor(cdp,attached,context.contextId,plan);await capture(cdp,attached.sessionId,mobile);
+    await cdp.send('Emulation.clearDeviceMetricsOverride',{},attached.sessionId);await cleanEditorView(cdp,attached,context.contextId);
+    m.pc.horizontalOverflow=!!finalObserved.body?.horizontalOverflow;m.pc.imageServerUrls=finalServerImages.map(i=>i.src);m.pc.imageWidths=finalServerImages.map(i=>i.width);m.pc.imagesCentered=finalServerImages.map(i=>i.centered);m.pc.rawUrlVisible=!!finalObserved.body?.rawUrlVisible;m.pc.sourceLinks=finalObserved.body?.links||[];
+    m.mobile.horizontalOverflow=!!finalMobileObserved.body?.horizontalOverflow;m.mobile.imageServerUrls=finalServerImages.map(i=>i.src);m.mobile.imageWidths=(finalMobileObserved.body?.images||[]).map(i=>i.width);m.mobile.imagesCentered=(finalMobileObserved.body?.images||[]).map(i=>i.centered);m.mobile.rawUrlVisible=!!finalMobileObserved.body?.rawUrlVisible;
+    m.secondPass.titleVerified=normalizeText(finalObserved.title)===normalizeText(plan.title);m.secondPass.bodyVerified=!!finalObserved.body?.text;m.secondPass.headingsVerified=finalObserved.headingsVerified;m.secondPass.linksVerified=(finalObserved.body?.links?.length||0)>0;
+    const finalImagesVerified=finalServerImages.length===prepared.imageUploadCount&&(finalObserved.body?.images||[]).length===prepared.imageUploadCount&&(finalMobileObserved.body?.images||[]).length===prepared.imageUploadCount&&finalServerImages.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered)&&(finalMobileObserved.body?.images||[]).every(i=>Math.abs(i.width-400)<=2&&i.centered);
+    m.secondPass.imagesVerified=finalImagesVerified;
+    m.secondPass.tagsVerified=tagEvidence.tags.length===plan.tags.length;
+    m.tagEvidence=tagEvidence;
+    atomicWrite(measurement,m);
+    const allVerified=imagesVerified&&finalImagesVerified&&m.secondPass.titleVerified&&m.secondPass.bodyVerified&&m.secondPass.linksVerified&&m.secondPass.headingsVerified&&m.secondPass.tagsVerified&&!m.pc.horizontalOverflow&&!m.mobile.horizontalOverflow;
+    atomicWrite(a.result,{status:allVerified?'Verified':'Blocked',reason:allVerified?'TAG_ONLY_SETTINGS_VERIFIED_AND_CLOSED':'FINAL_VERIFICATION_FAILED',editorUrl:outer,publicationSettingsOpened:false,publicationSettingsEverOpenedForTags:true,publicationSettingsPurpose:'TagsOnly',visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:m.secondPass.tagsVerified,formatVerified:m.secondPass.headingsVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:allVerified,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement,observedTags:tagEvidence.tags});
   } finally {cdp.close()}
 }
 // Windows의 한글/공백/OneDrive 경로는 argv 경로와 import.meta.url의 문자열 표현이

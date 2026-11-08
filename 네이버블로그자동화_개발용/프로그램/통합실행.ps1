@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$PackagePath,[switch]$ConnectionTestOnly)
+param([Parameter(Mandatory=$true)][string]$PackagePath,[switch]$ConnectionTestOnly,[switch]$AllowTagOnlyPublicationSettings)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot '통합실행결과검증.ps1')
 $package=Get-Content -LiteralPath $PackagePath -Raw -Encoding UTF8|ConvertFrom-Json
@@ -32,14 +32,14 @@ try{
         return
     }
     Set-RunStatus 'Executing' '전용 Chrome에서 새 네이버 편집기를 열고 계획을 입력합니다.'
-    $out=& (Join-Path $PSScriptRoot '크롬직접연결.ps1') -PackagePath $PackagePath -RunDirectory $root|ConvertFrom-Json
+    $out=& (Join-Path $PSScriptRoot '크롬직접연결.ps1') -PackagePath $PackagePath -RunDirectory $root -AllowTagOnlyPublicationSettings:$AllowTagOnlyPublicationSettings|ConvertFrom-Json
     $out|Add-Member -NotePropertyName runId -NotePropertyValue $runId -Force
     if($out.status -eq 'Blocked'){
         Set-RunStatus 'Blocked' ([string]$out.reason)
         $out|ConvertTo-Json -Depth 10
         return
     }
-    Assert-NaverRunResult $out $runId $root ([string]$package.editorPlan)
+    Assert-NaverRunResult $out $runId $root ([string]$package.editorPlan) ([bool]$AllowTagOnlyPublicationSettings)
     Set-RunStatus 'Verified' '새 글 편집창 입력 및 두 번째 검증 통과'
     $out|ConvertTo-Json -Depth 10
 }catch{

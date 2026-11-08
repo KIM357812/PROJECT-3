@@ -14,10 +14,20 @@ function Assert-NaverBrowserPreflight($Result, [string]$RunId) {
     $uri = $null
     if (-not [uri]::TryCreate([string]$Result.url,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https' -or $uri.Host -ne 'blog.naver.com') { throw '네이버 블로그 탭 확인 실패' }
 }
-function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$EditorPlanPath) {
+function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$EditorPlanPath, [bool]$AllowTagOnlyPublicationSettings=$false) {
     if ($Result.runId -ne $RunId) { throw '다른 실행의 검증 결과입니다.' }
     if ($Result.status -ne 'Verified') { throw "실행 미완료: $($Result.reason)" }
     if ($Result.publicationSettingsOpened -ne $false -or $Result.published -ne $false) { throw '발행 전 종료 조건 위반입니다.' }
+    if ($AllowTagOnlyPublicationSettings) {
+        if ($Result.publicationSettingsEverOpenedForTags -ne $true -or
+            [string]$Result.publicationSettingsPurpose -ne 'TagsOnly' -or
+            $Result.visibilityChanged -ne $false -or $Result.scheduleChanged -ne $false -or
+            $Result.publishButtonClicked -ne $false) {
+            throw '태그 전용 발행 설정 사용 증거가 올바르지 않습니다.'
+        }
+    } elseif ($Result.publicationSettingsEverOpenedForTags -eq $true) {
+        throw '승인되지 않은 발행 설정 진입입니다.'
+    }
     foreach ($name in @('imagesGenerated','imagesOptimized','imagesUploaded','titleVerified','bodyVerified','linksVerified','tagsVerified','formatVerified','mobileVerified','secondPassVerified')) {
         if ($Result.$name -ne $true) { throw "검증 누락: $name" }
     }
