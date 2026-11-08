@@ -19,13 +19,17 @@ try {
         @{Order=2;Role='비용경로';Base='02-비용경로';Output='02-비용경로.jpg';Placement='설명 뒤'},
         @{Order=3;Role='비용분담';Base='03-비용분담';Output='03-비용분담.jpg';Placement='판단 앞'}
     )
+    $roleIndex = 0
     foreach ($role in $roles) {
+        $roleIndex++
         $path = Join-Path $originalDirectory ($role.Base + '.png')
         $bitmap = New-Object Drawing.Bitmap(900, 600)
         $graphics = [Drawing.Graphics]::FromImage($bitmap)
         try {
             $graphics.Clear([Drawing.Color]::FromArgb(15, 54, 82))
-            $graphics.FillRectangle([Drawing.Brushes]::LimeGreen, 250, 150, 400, 300)
+            $color = [Drawing.Color]::FromArgb(30 * $roleIndex, 80 + (20 * $roleIndex), 140 + (20 * $roleIndex))
+            $brush = New-Object Drawing.SolidBrush($color)
+            try { $graphics.FillRectangle($brush, 250, 150, 400, 300) } finally { $brush.Dispose() }
             $bitmap.Save($path, [Drawing.Imaging.ImageFormat]::Png)
         } finally {
             $graphics.Dispose()

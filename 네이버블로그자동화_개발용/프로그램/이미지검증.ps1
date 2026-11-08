@@ -22,6 +22,7 @@ if ([IO.Path]::GetFullPath([string]$manifest.originalDirectory) -eq [IO.Path]::G
 }
 
 $checked = @()
+$optimizedHashes = @{}
 foreach ($asset in $assets) {
     $path = Join-Path ([string]$manifest.optimizedDirectory) ([string]$asset.outputFileName)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -32,6 +33,20 @@ foreach ($asset in $assets) {
         $issues += "JPEG 형식이 아닙니다: $($asset.outputFileName)"
         continue
     }
+    if ([string]::IsNullOrWhiteSpace([string]$asset.sourceSha256) -or [string]::IsNullOrWhiteSpace([string]$asset.optimizedSha256)) {
+        $issues += "이미지 생성·최적화 출처 증거가 없습니다: $($asset.outputFileName)"
+        continue
+    }
+    $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    if ($actualHash -ne [string]$asset.optimizedSha256) {
+        $issues += "최적화 이미지가 생성 후 변경되었습니다: $($asset.outputFileName)"
+        continue
+    }
+    if ($optimizedHashes.ContainsKey($actualHash)) {
+        $issues += "동일한 이미지를 여러 위치에 재사용했습니다: $($asset.outputFileName)"
+        continue
+    }
+    $optimizedHashes[$actualHash] = $true
 
     $image = $null
     try {
@@ -50,6 +65,8 @@ foreach ($asset in $assets) {
             height = $image.Height
             kilobytes = $kilobytes
             placement = [string]$asset.placement
+            sourceSha256 = [string]$asset.sourceSha256
+            optimizedSha256 = $actualHash
         }
     } finally {
         if ($null -ne $image) { $image.Dispose() }

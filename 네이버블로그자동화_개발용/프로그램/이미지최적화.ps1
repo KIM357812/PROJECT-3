@@ -33,6 +33,7 @@ $jpegEncoder = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
 if ($null -eq $jpegEncoder) { throw 'Windows JPEG 인코더를 찾을 수 없습니다.' }
 
 $results = @()
+$sourceHashes = @{}
 foreach ($asset in $assets) {
     $matches = @(Get-ChildItem -LiteralPath ([string]$manifest.originalDirectory) -File |
         Where-Object { $_.BaseName -eq [string]$asset.originalBaseName })
@@ -41,6 +42,14 @@ foreach ($asset in $assets) {
     }
 
     $sourcePath = $matches[0].FullName
+    if ($matches[0].BaseName -match '^(pc|mobile|inspect|screenshot|capture)([-_].*)?$') {
+        throw "시험 화면 캡처는 기사 이미지로 사용할 수 없습니다: $sourcePath"
+    }
+    $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
+    if ($sourceHashes.ContainsKey($sourceHash)) {
+        throw "동일한 원본 이미지를 여러 역할에 재사용할 수 없습니다: $sourcePath"
+    }
+    $sourceHashes[$sourceHash] = $true
     $outputPath = Join-Path ([string]$manifest.optimizedDirectory) ([string]$asset.outputFileName)
     if (Test-Path -LiteralPath $outputPath) {
         throw "기존 변환 이미지를 덮어쓰지 않습니다: $outputPath"
@@ -114,6 +123,10 @@ foreach ($asset in $assets) {
         $source.Dispose()
         $source = $null
         [IO.File]::WriteAllBytes($outputPath, $encodedBytes)
+        $optimizedHash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
+        $asset | Add-Member -NotePropertyName sourceSha256 -NotePropertyValue $sourceHash -Force
+        $asset | Add-Member -NotePropertyName optimizedSha256 -NotePropertyValue $optimizedHash -Force
+        $asset | Add-Member -NotePropertyName generationRegisteredAt -NotePropertyValue (Get-Date).ToString('o') -Force
         $results += [pscustomobject]@{
             role = [string]$asset.role
             source = $sourcePath
@@ -122,6 +135,8 @@ foreach ($asset in $assets) {
             height = $targetHeight
             quality = $quality
             kilobytes = [Math]::Round($byteLength / 1KB, 1)
+            sourceSha256 = $sourceHash
+            optimizedSha256 = $optimizedHash
         }
     } finally {
         if ($null -ne $graphics) { $graphics.Dispose() }
@@ -129,5 +144,7 @@ foreach ($asset in $assets) {
         if ($null -ne $source) { $source.Dispose() }
     }
 }
+
+$manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
 
 @($results) | ConvertTo-Json -Depth 5

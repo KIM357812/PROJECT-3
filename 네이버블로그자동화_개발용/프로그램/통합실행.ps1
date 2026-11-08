@@ -19,6 +19,9 @@ $ownsMutex=$false
 try{
     try{$ownsMutex=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$ownsMutex=$true}
     if(-not $ownsMutex){throw '다른 네이버 편집기 자동화가 실행 중입니다.'}
+    Set-RunStatus 'CheckingImages' '기사 전용 생성 이미지의 출처·고유성·크기·용량을 검사합니다.'
+    $imageCheck=& (Join-Path $PSScriptRoot '이미지검증.ps1') -ManifestPath $package.imageManifest|ConvertFrom-Json
+    if(-not $imageCheck.isValid){throw '최종 이미지 파일 독립 검사 실패'}
     Set-RunStatus 'CheckingBrowser' '자동화 전용 Chrome 직접 연결을 확인합니다.'
     $preflight=& (Join-Path $PSScriptRoot '크롬직접연결.ps1') -PackagePath $PackagePath -RunDirectory $root -ConnectionTestOnly|ConvertFrom-Json
     $preflight|Add-Member -NotePropertyName runId -NotePropertyValue $runId -Force
@@ -36,8 +39,6 @@ try{
         $out|ConvertTo-Json -Depth 10
         return
     }
-    $imageCheck=& (Join-Path $PSScriptRoot '이미지검증.ps1') -ManifestPath $package.imageManifest|ConvertFrom-Json
-    if(-not $imageCheck.isValid){throw '최종 이미지 파일 독립 검사 실패'}
     Assert-NaverRunResult $out $runId $root ([string]$package.editorPlan)
     Set-RunStatus 'Verified' '새 글 편집창 입력 및 두 번째 검증 통과'
     $out|ConvertTo-Json -Depth 10

@@ -37,6 +37,17 @@ export function extractHtmlBodyFragment(html){
 export function assertNewPostSafety(url,blogId){
   if(!isAuthorizedNaverUrl(url,blogId,{allowWrite:true})) throw new Error('UNSAFE_EDITOR_URL');
 }
+export function validatePlannedImagePaths(plan,manifest){
+  const actions=[...(plan.actions??[])].filter(x=>x.type==='UploadImageAtAnchor').sort((a,b)=>Number(a.documentOrder)-Number(b.documentOrder));
+  const assets=[...(manifest.assets??[])].sort((a,b)=>Number(a.order)-Number(b.order));
+  if(actions.length!==assets.length||actions.length!==Number(manifest.specification?.count)) throw new Error('IMAGE_PLAN_COUNT_MISMATCH');
+  const base=path.resolve(String(manifest.optimizedDirectory));
+  const expected=assets.map(a=>path.resolve(base,String(a.outputFileName)).toLowerCase());
+  const actual=actions.map(a=>path.resolve(String(a.path)).toLowerCase());
+  if(expected.some((value,index)=>value!==actual[index])) throw new Error('IMAGE_PLAN_PATH_MISMATCH');
+  if(new Set(actual).size!==actual.length) throw new Error('IMAGE_PLAN_DUPLICATE_PATH');
+  return true;
+}
 function escapeHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function normalizeText(s){return String(s??'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim()}
 function atomicWrite(file,data){
@@ -285,7 +296,7 @@ async function main(){
       atomicWrite(a.result,{status:'Ready',targetId:editorTarget.targetId,targetUrl:editorTarget.url,screenshot,contexts:await inspectEditableDom(cdp,attached)});
       return;
     }
-    const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
+    const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);const imageManifest=readJson(pkg.imageManifest);validatePlannedImagePaths(plan,imageManifest);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
     const missingImages=plan.actions.filter(x=>x.type==='UploadImageAtAnchor'&&!fs.existsSync(x.path)).map(x=>x.path);
     if(missingImages.length){atomicWrite(a.result,{status:'Blocked',reason:'IMAGE_FILES_REQUIRED',missingImages,publicationSettingsOpened:false,published:false});return}
     const created=await cdp.send('Target.createTarget',{url:a['write-url'],newWindow:false});

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies} from '../프로그램/크롬직접실행.mjs';
+import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths} from '../프로그램/크롬직접실행.mjs';
 
 test('argument parser keeps Korean and spaced paths as values',()=>{
   assert.deepEqual(parseArgs(['--mode','execute','--package','C:\\한글 폴더\\실행패키지.json']),{mode:'execute',package:'C:\\한글 폴더\\실행패키지.json'});
@@ -36,4 +36,16 @@ test('preflight requires both Naver authentication cookies',async()=>{
   const cdpWithPublicOnly={send:async()=>({cookies:[{domain:'.naver.com',name:'NNB'},{domain:'example.com',name:'NID_AUT'}]})};
   assert.deepEqual(await verifyNaverAuthCookies(cdpWithBoth),{verified:true});
   assert.deepEqual(await verifyNaverAuthCookies(cdpWithPublicOnly),{verified:false});
+});
+test('image actions must use only manifest optimized files in document order',()=>{
+  const manifest={optimizedDirectory:'C:\\work\\images\\optimized',specification:{count:2},assets:[
+    {order:1,outputFileName:'01-대표.jpg'},{order:2,outputFileName:'02-현황.jpg'}
+  ]};
+  const good={actions:[
+    {type:'UploadImageAtAnchor',documentOrder:2,path:'C:\\work\\images\\optimized\\02-현황.jpg'},
+    {type:'UploadImageAtAnchor',documentOrder:1,path:'C:\\work\\images\\optimized\\01-대표.jpg'}
+  ]};
+  assert.equal(validatePlannedImagePaths(good,manifest),true);
+  const screenshot={actions:good.actions.map((a,i)=>({...a,path:`C:\\temp\\pc${i}.png`}))};
+  assert.throws(()=>validatePlannedImagePaths(screenshot,manifest),/IMAGE_PLAN_PATH_MISMATCH/);
 });
