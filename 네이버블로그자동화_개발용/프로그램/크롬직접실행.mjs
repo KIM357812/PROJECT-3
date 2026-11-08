@@ -247,11 +247,12 @@ async function readPublicationState(cdp,attached,contextId){
 function samePublicationState(before,after){
   return before.openType===after.openType&&before.radioTime===after.radioTime&&JSON.stringify(before.options)===JSON.stringify(after.options);
 }
-async function applyTagsOnly(cdp,attached,editorContextId,tags,runDir){
+async function applyTagsOnly(cdp,attached,editorContextId,tags,runDir,{closeSettings=true}={}){
   const planned=[...new Set((tags??[]).map(x=>String(x).trim()).filter(Boolean))];
   if(planned.length<5||planned.length>10)throw new Error('TAG_COUNT_OUT_OF_RANGE');
-  await clickVisible(cdp,attached.sessionId,editorContextId,'button[data-click-area="tpb.publish"]');
-  const publication=await findPublicationContext(cdp,attached);
+  let publication=null;
+  try{publication=await findPublicationContext(cdp,attached,700)}catch{}
+  if(!publication){await clickVisible(cdp,attached.sessionId,editorContextId,'button[data-click-area="tpb.publish"]');publication=await findPublicationContext(cdp,attached)}
   const before=await readPublicationState(cdp,attached,publication.contextId);
   for(let i=0;i<planned.length;i++){
     const tag=planned[i];
@@ -269,10 +270,12 @@ async function applyTagsOnly(cdp,attached,editorContextId,tags,runDir){
   if(!samePublicationState(before,after))throw new Error('PUBLICATION_OPTIONS_CHANGED_DURING_TAG_ENTRY');
   if(observed.length!==planned.length||observed.some((x,i)=>x!==planned[i]))throw new Error('TAG_VERIFICATION_FAILED');
   if(!after.finalPublishVisible)throw new Error('PUBLICATION_PANEL_STATE_UNKNOWN');
-  await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
-  await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
-  await waitFor(cdp,attached.sessionId,`!document.querySelector('button[data-testid="seOnePublishBtn"]')?.offsetParent`,{contextId:publication.contextId,timeout:5000});
-  return {tags:observed,publicationSettingsEverOpenedForTags:true,publicationSettingsOpenedAtStop:false,publicationSettingsPurpose:'TagsOnly',visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false};
+  if(closeSettings){
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27},attached.sessionId);
+    await waitFor(cdp,attached.sessionId,`!document.querySelector('button[data-testid="seOnePublishBtn"]')?.offsetParent`,{contextId:publication.contextId,timeout:5000});
+  }
+  return {tags:observed,publicationSettingsEverOpenedForTags:true,publicationSettingsOpenedAtStop:!closeSettings,publicationSettingsPurpose:'TagsOnly',visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false};
 }
 async function cleanEditorView(cdp,attached,contextId){
   await evaluate(cdp,attached.sessionId,`(()=>{document.querySelector('.se-sidebar-close-button')?.click();getSelection()?.removeAllRanges();document.activeElement?.blur?.();window.scrollTo(0,0);for(const e of [document.scrollingElement,document.documentElement,document.body,...document.querySelectorAll('*')]){if(!e)continue;if(e.scrollTop>0)e.scrollTop=0;if(e.scrollLeft>0)e.scrollLeft=0}return true})()`,contextId).catch(()=>{});
@@ -407,6 +410,49 @@ async function main(){
       const out=ready?{status:'Ready',errorCode:'',reason:'전용 Chrome DevTools 연결과 새 글 편집기 접근을 실제로 확인했습니다.',extensionConnected:false,directChromeConnected:true,naverTabReadVerified:true,ownerLoginVerified:true,newEditorAccessVerified:true,browserId:`cdp:${port}`,tabId:blogTarget.targetId,url:blogTarget.url}:{status:'Failed',errorCode:blogTarget?'NAVER_LOGIN_REQUIRED':'NAVER_TAB_UNAVAILABLE',reason:blogTarget?'자동화 전용 Chrome에서 새 글 편집기가 로그인 화면으로 전환되었습니다. 이 전용 Chrome에서 네이버 로그인을 완료한 뒤 다시 실행하세요.':'전용 Chrome에서 네이버 블로그 탭을 확인할 수 없습니다.',extensionConnected:false,directChromeConnected:true,naverTabReadVerified:!!blogTarget,ownerLoginVerified:false,newEditorAccessVerified:false,authCookiePairPresent:auth.verified,browserId:`cdp:${port}`,tabId:blogTarget?.targetId||'',url:blogTarget?.url||'',probeReason:editorProbe.reason||''};
       atomicWrite(a.result,out);return;
     }
+    if(a.mode==='tags-current'){
+      const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);
+      const editorTarget=a['target-id']?targets.find(t=>t.targetId===a['target-id']):targets.find(t=>isAuthorizedNaverUrl(t.url,a['blog-id'],{allowWrite:true}));
+      if(!editorTarget){atomicWrite(a.result,{status:'Failed',reason:'EDITOR_TARGET_NOT_FOUND',published:false});return}
+      const attached=await attach(cdp,editorTarget.targetId);const editorContext=await findEditorContext(cdp,attached,10000);
+      const editorUrl=await currentUrl(cdp,attached.sessionId);assertNewPostSafety(editorUrl,a['blog-id']);
+      const evidence=await applyTagsOnly(cdp,attached,editorContext.contextId,plan.tags,a['run-dir'],{closeSettings:false});
+      atomicWrite(a.result,{status:'Verified',editorUrl,tagsVerified:evidence.tags.length===plan.tags.length,observedTags:evidence.tags,publicationSettingsOpened:true,visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false,published:false});
+      return;
+    }
+    if(a.mode==='publish-private'){
+      if(a['confirm-private-publish']!=='true'){atomicWrite(a.result,{status:'Blocked',reason:'EXPLICIT_PRIVATE_PUBLISH_CONFIRMATION_REQUIRED',published:false});return}
+      const editorTarget=a['target-id']?targets.find(t=>t.targetId===a['target-id']):targets.find(t=>isAuthorizedNaverUrl(t.url,a['blog-id'],{allowWrite:true}));
+      if(!editorTarget){atomicWrite(a.result,{status:'Failed',reason:'EDITOR_TARGET_NOT_FOUND',published:false});return}
+      const attached=await attach(cdp,editorTarget.targetId);
+      const editorContext=await findEditorContext(cdp,attached,10000);
+      const editorUrl=await currentUrl(cdp,attached.sessionId);
+      assertNewPostSafety(editorUrl,a['blog-id']);
+      const content=await evaluate(cdp,attached.sessionId,`(()=>({title:(document.querySelector('.se-documentTitle [contenteditable="true"],.se-title-text[contenteditable="true"],.se-documentTitle .se-text-paragraph')?.textContent||'').trim(),body:(document.querySelector('.se-main-container,article')?.innerText||'').trim(),images:document.querySelectorAll('img.se-image-resource').length}))()`,editorContext.contextId);
+      if(!content?.title||!content?.body||content.images<1){atomicWrite(a.result,{status:'Blocked',reason:'EDITOR_CONTENT_INCOMPLETE',published:false,content});return}
+      let publication=null;
+      try{publication=await findPublicationContext(cdp,attached,700)}catch{}
+      if(!publication){await clickVisible(cdp,attached.sessionId,editorContext.contextId,'button[data-click-area="tpb.publish"]');publication=await findPublicationContext(cdp,attached,5000)}
+      const privateChoice=await evaluate(cdp,attached.sessionId,`(()=>{const norm=s=>String(s||'').replace(/\\s+/g,' ').trim();const labels=[...document.querySelectorAll('label')];const label=labels.find(e=>norm(e.textContent)==='비공개');if(!label)return{found:false};const input=label.querySelector('input[name="open_type"]')||document.getElementById(label.htmlFor)||label.parentElement?.querySelector('input[name="open_type"]');if(!input)return{found:true,inputFound:false};if(!input.checked)label.click();return{found:true,inputFound:true,value:input.value,checked:input.checked}})()`,publication.contextId);
+      if(!privateChoice?.found||!privateChoice?.inputFound){atomicWrite(a.result,{status:'Blocked',reason:'PRIVATE_VISIBILITY_CONTROL_NOT_FOUND',published:false,privateChoice});return}
+      await waitFor(cdp,attached.sessionId,`(()=>{const norm=s=>String(s||'').replace(/\\s+/g,' ').trim();const label=[...document.querySelectorAll('label')].find(e=>norm(e.textContent)==='비공개');const input=label&&(label.querySelector('input[name="open_type"]')||document.getElementById(label.htmlFor)||label.parentElement?.querySelector('input[name="open_type"]'));return !!input?.checked})()`,{contextId:publication.contextId,timeout:5000});
+      const selectedState=await readPublicationState(cdp,attached,publication.contextId);
+      if(!selectedState.openType){atomicWrite(a.result,{status:'Blocked',reason:'PRIVATE_VISIBILITY_NOT_VERIFIED',published:false,selectedState});return}
+      await clickVisible(cdp,attached.sessionId,publication.contextId,'button[data-testid="seOnePublishBtn"]');
+      let publishedUrl='';
+      const deadline=Date.now()+20000;
+      while(Date.now()<deadline&&!publishedUrl){
+        const currentTargets=(await cdp.send('Target.getTargets')).targetInfos.filter(t=>t.type==='page');
+        const candidate=currentTargets.find(t=>{try{const u=new URL(t.url),parts=u.pathname.split('/').filter(Boolean);return u.protocol==='https:'&&u.hostname==='blog.naver.com'&&((parts[0]===a['blog-id']&&/^\\d+$/.test(parts[1]||''))||(u.pathname==='/PostView.naver'&&u.searchParams.get('blogId')===a['blog-id']&&/^\\d+$/.test(u.searchParams.get('logNo')||'')))}catch{return false}});
+        if(candidate)publishedUrl=candidate.url;else await sleep(500);
+      }
+      if(!publishedUrl){
+        const current=await currentUrl(cdp,attached.sessionId).catch(()=> '');
+        if(new RegExp(`^https://blog\\.naver\\.com/${a['blog-id']}/\\d+`).test(current))publishedUrl=current;
+      }
+      atomicWrite(a.result,publishedUrl?{status:'Published',visibility:'private',published:true,editorUrl,publishedUrl,title:content.title,imageCount:content.images}:{status:'Failed',reason:'PRIVATE_PUBLISH_RESULT_NOT_VERIFIED',published:false,editorUrl,selectedState});
+      return;
+    }
     if(a.mode==='inspect'){
       const editorTarget=a['target-id']?targets.find(t=>t.targetId===a['target-id']):targets.find(t=>isAuthorizedNaverUrl(t.url,a['blog-id'],{allowWrite:true}));
       if(!editorTarget){atomicWrite(a.result,{status:'Failed',reason:'EDITOR_TARGET_NOT_FOUND'});return}
@@ -435,8 +481,10 @@ async function main(){
       }
       const screenshot=path.join(a['run-dir'],`inspect-${editorTarget.targetId}.png`);
       await capture(cdp,attached.sessionId,screenshot);
+      let publicationState=null;
+      try{const publication=await findPublicationContext(cdp,attached,500);publicationState=await readPublicationState(cdp,attached,publication.contextId)}catch{}
       const layoutCheck=inspectedEditorContext?await evaluate(cdp,attached.sessionId,`(()=>{const norm=s=>String(s||'').replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim();const q=${JSON.stringify(normalizeText(a['scroll-text']||''))};const ps=[...document.querySelectorAll('p')];const marker=ps.find(e=>norm(e.textContent).startsWith(q));if(!marker)return null;const markerIndex=ps.indexOf(marker);const candidates=ps.slice(markerIndex+1,markerIndex+12).map(e=>{const leaf=e.querySelector('b,strong,span')||e,cs=getComputedStyle(leaf),r=e.getBoundingClientRect();return{element:e,text:norm(e.textContent),fontSize:parseFloat(cs.fontSize)||0,fontWeight:parseFloat(cs.fontWeight)||0,top:r.top,bottom:r.bottom}});const headingRow=candidates.find(x=>x.fontSize>=18&&x.fontWeight>=600&&x.text);const heading=headingRow?.element;const box=marker.closest('table')||marker.closest('.se-component')||marker.parentElement;const br=box?.getBoundingClientRect(),hr=heading?.getBoundingClientRect();return{markerText:norm(marker.textContent),boxTag:box?.tagName||'',boxClass:box?.className||'',boxBottom:br?.bottom??null,nextHeading:norm(heading?.textContent),headingTop:hr?.top??null,gapPx:br&&hr?Math.round((hr.top-br.bottom)*10)/10:null,candidates:candidates.map(({element,...x})=>x)}})()`,inspectedEditorContext.contextId):null;
-      atomicWrite(a.result,{status:'Ready',targetId:editorTarget.targetId,targetUrl:editorTarget.url,screenshot,layoutCheck,contexts:await inspectEditableDom(cdp,attached)});
+      atomicWrite(a.result,{status:'Ready',targetId:editorTarget.targetId,targetUrl:editorTarget.url,screenshot,publicationState,layoutCheck,contexts:await inspectEditableDom(cdp,attached)});
       return;
     }
     const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);const imageManifest=readJson(pkg.imageManifest);validatePlannedImagePaths(plan,imageManifest);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
@@ -472,7 +520,7 @@ async function main(){
     const uploaded=prepared.uploadedImages||[];
     const imagesVerified=prepared.imageUploadCount===pcImages.length&&prepared.imageUploadCount===mobileImages.length&&uploaded.length===prepared.imageUploadCount&&stabilizedServerImages.length===prepared.imageUploadCount&&uploaded.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered)&&stabilizedServerImages.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered)&&observed.representativeImageVerified;
     const imageFileNames=uploaded.map(i=>path.basename(i.sourcePath));const imageServerUrls=stabilizedServerImages.map(i=>i.src);
-    const m={schemaVersion:1,measurementSource:'RenderedNaverDomAndScreen',pc:{horizontalOverflow:!!observed.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:pcImages.map(i=>i.width),imagesCentered:pcImages.map(i=>i.centered),representativeImageVerified:observed.representativeImageVerified,imageHeadingGaps:pcImages.map(i=>i.headingGapPx),imageNearestHeadings:pcImages.map(i=>i.nearestHeading),headingDetails:observed.body?.headingDetails||[],tableHeadingGaps:observed.body?.tableHeadingGaps||[],referenceBox:observed.body?.referenceBox||null,referenceToRelatedGapPx:observed.body?.referenceToRelatedGapPx??null,rawUrlVisible:!!observed.body?.rawUrlVisible,sourceLinks:observed.body?.links||[]},mobile:{horizontalOverflow:!!mobileObserved.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:mobileImages.map(i=>i.width),imagesCentered:mobileImages.map(i=>i.centered),representativeImageVerified:mobileObserved.representativeImageVerified,imageHeadingGaps:mobileImages.map(i=>i.headingGapPx),imageNearestHeadings:mobileImages.map(i=>i.nearestHeading),headingDetails:mobileObserved.body?.headingDetails||[],tableHeadingGaps:mobileObserved.body?.tableHeadingGaps||[],referenceBox:mobileObserved.body?.referenceBox||null,referenceToRelatedGapPx:mobileObserved.body?.referenceToRelatedGapPx??null,rawUrlVisible:!!mobileObserved.body?.rawUrlVisible},secondPass:{wholeArticleFromStart:true,titleVerified:normalizeText(observed.title)===normalizeText(plan.title),bodyVerified:!!observed.body?.text,headingsVerified:observed.headingsVerified,hierarchyVerified:observed.hierarchyVerified&&mobileObserved.hierarchyVerified,tableHeadingSpacingVerified:observed.tableHeadingSpacingVerified&&mobileObserved.tableHeadingSpacingVerified,referenceSpacingVerified:observed.referenceSpacingVerified&&mobileObserved.referenceSpacingVerified,imagePlacementVerified:observed.imagePlacementVerified&&mobileObserved.imagePlacementVerified,representativeImageVerified:observed.representativeImageVerified&&mobileObserved.representativeImageVerified,imagesVerified,linksVerified:(observed.body?.links?.length||0)>0}};
+    const m={schemaVersion:1,measurementSource:'RenderedNaverDomAndScreen',pc:{horizontalOverflow:!!observed.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:pcImages.map(i=>i.width),imagesCentered:pcImages.map(i=>i.centered),representativeImageVerified:observed.representativeImageVerified,imageHeadingGaps:pcImages.map(i=>i.headingGapPx),imageNearestHeadings:pcImages.map(i=>i.nearestHeading),headingDetails:observed.body?.headingDetails||[],tableHeadingGaps:observed.body?.tableHeadingGaps||[],referenceBox:observed.body?.referenceBox||null,referenceToRelatedGapPx:observed.body?.referenceToRelatedGapPx??null,rawUrlVisible:!!observed.body?.rawUrlVisible,sourceLinks:observed.body?.links||[]},mobile:{horizontalOverflow:!!mobileObserved.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:mobileImages.map(i=>i.width),imagesCentered:mobileImages.map(i=>i.centered),representativeImageVerified:mobileObserved.representativeImageVerified,imageHeadingGaps:mobileImages.map(i=>i.headingGapPx),imageNearestHeadings:mobileImages.map(i=>i.nearestHeading),headingDetails:mobileObserved.body?.headingDetails||[],tableHeadingGaps:mobileObserved.body?.tableHeadingGaps||[],referenceBox:mobileObserved.body?.referenceBox||null,referenceToRelatedGapPx:mobileObserved.body?.referenceToRelatedGapPx??null,rawUrlVisible:!!mobileObserved.body?.rawUrlVisible},secondPass:{wholeArticleFromStart:true,titleVerified:normalizeText(observed.title)===normalizeText(plan.title),bodyVerified:!!observed.body?.text,headingsVerified:observed.headingsVerified,hierarchyVerified:observed.hierarchyVerified&&mobileObserved.hierarchyVerified,tableHeadingSpacingVerified:observed.tableHeadingSpacingVerified&&mobileObserved.tableHeadingSpacingVerified,referenceSpacingVerified:observed.referenceSpacingVerified&&mobileObserved.referenceSpacingVerified,imagePlacementVerified:observed.imagePlacementVerified&&mobileObserved.imagePlacementVerified,representativeImageVerified:observed.representativeImageVerified&&mobileObserved.representativeImageVerified,imagesVerified,linksVerified:(observed.body?.links?.length||0)}};
     atomicWrite(measurement,m);
     if(a['allow-tag-only-publication-settings']!=='true'){
       atomicWrite(a.result,{status:'Blocked',reason:'CONTENT_AND_IMAGES_VERIFIED_TAGS_REQUIRE_EXPLICIT_SETTINGS_APPROVAL',editorUrl:outer,publicationSettingsOpened:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:false,formatVerified:m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.tableHeadingSpacingVerified&&m.secondPass.referenceSpacingVerified&&m.secondPass.imagePlacementVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:false,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement});
