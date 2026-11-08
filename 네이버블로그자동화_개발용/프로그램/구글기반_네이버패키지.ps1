@@ -66,10 +66,13 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     $result = [regex]::Replace($result, '(?i)font-size\s*:\s*16px', ('font-size:{0}px' -f [int]$Formatting.BodyFontSizePx))
     $result = [regex]::Replace($result, '(?is)<h2\b[^>]*>(?<text>.*?)</h2>', {
         param($match)
-        '<div data-naver-role="section-heading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;text-decoration:underline;text-underline-offset:4px;color:#111;text-align:left;word-break:keep-all;">{3}</p></div>' -f
+        '<div data-naver-role="section-heading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;text-decoration-line:underline;text-underline-offset:{3}px;text-decoration-thickness:{4}px;text-decoration-color:{5};color:#111;text-align:left;word-break:keep-all;">{6}</p></div>' -f
             [int]$Formatting.SectionHeadingTopPx,
             [int]$Formatting.SectionHeadingBottomPx,
             [int]$Formatting.SectionHeadingFontSizePx,
+            [int]$Formatting.SectionHeadingUnderlineOffsetPx,
+            [int]$Formatting.SectionHeadingUnderlineThicknessPx,
+            [string]$Formatting.SectionHeadingUnderlineColor,
             $match.Groups['text'].Value
     })
     $result = [regex]::Replace($result, '(?is)<h3\b[^>]*>(?<text>.*?)</h3>', {
@@ -90,6 +93,27 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
         param($match)
         $style = [regex]::Replace($match.Groups['style'].Value, '(?i)margin(?:-top)?\s*:[^;]+;?', '')
         '<div data-blog-sources="true" data-naver-role="references" style="margin:{0}px 0 0 0;{1}">' -f [int]$Formatting.ReferenceTopPx, $style
+    })
+    $result = [regex]::Replace($result, '(?is)<div\b(?=[^>]*\bclass\s*=\s*["''][^"'']*\bsolidb-responsive-table\b)[^>]*>', {
+        param($match)
+        $tag = $match.Value
+        if ($tag -match '(?i)style\s*=\s*"(?<style>[^"]*)"') {
+            $style = [regex]::Replace($Matches['style'], '(?i)margin\s*:[^;]+;?', '')
+            return [regex]::Replace($tag, '(?i)style\s*=\s*"[^"]*"', ('style="margin:25px 0 0 0;{0}"' -f $style))
+        }
+        return $tag.TrimEnd('>') + ' style="margin:25px 0 0 0;">'
+    })
+    $result = [regex]::Replace($result, '(?is)<div\s+data-blog-related="true"\s+style="(?<style>[^"]*)">', {
+        param($match)
+        $style = [regex]::Replace($match.Groups['style'].Value, '(?i)margin(?:-top)?\s*:[^;]+;?', '')
+        '<div data-blog-related="true" data-naver-role="related" style="margin:{0}px 0 0 0;{1}">' -f [int]$Formatting.ReferenceToRelatedPx, $style
+    })
+    $result = [regex]::Replace($result, '(?is)(?<sources><div\b(?=[^>]*\bdata-blog-sources="true")[^>]*>\s*<p\b[^>]*>[\s\S]*?</p>\s*</div>)\s*(?<related><div\b(?=[^>]*\bdata-blog-related="true")[^>]*>[\s\S]*?</div>)', {
+        param($match)
+        $sources = [regex]::Replace($match.Groups['sources'].Value, '(?i)margin\s*:\s*[^;]+;', 'margin:0;', 1)
+        $related = [regex]::Replace($match.Groups['related'].Value, '(?i)margin\s*:\s*[^;]+;', 'margin:0;', 1)
+        $related = [regex]::Replace($related, '(?is)(<div\b[^>]*\bdata-blog-related="true"[^>]*>)', ('$1<span data-nte-reference-gap="true" style="display:block;height:{0}px;line-height:{0}px;font-size:1px;color:transparent;">&nbsp;</span>' -f [int]$Formatting.ReferenceToRelatedPx), 1)
+        '<table data-naver-role="reference-group" style="width:100%;margin:{0}px 0 0 0;border-collapse:collapse;border:1px solid #D9DDE3;background:#fff;box-sizing:border-box;"><tbody><tr><td style="padding:12px 14px;border:0;background:#fff;">{1}{2}</td></tr></tbody></table>' -f [int]$Formatting.ReferenceTopPx, $sources, $related
     })
     return $result.Trim()
 }
@@ -215,6 +239,9 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $topPx = if ($level -eq 2) { [int]$Formatting.SectionHeadingTopPx } else { [int]$Formatting.SubheadingTopPx }
             $bottomPx = if ($level -eq 2) { [int]$Formatting.SectionHeadingBottomPx } else { [int]$Formatting.SubheadingBottomPx }
             $underline = if ($level -eq 2) { [bool]$Formatting.SectionHeadingUnderline } else { [bool]$Formatting.SubheadingUnderline }
+            $underlineOffset = if ($level -eq 2) { [int]$Formatting.SectionHeadingUnderlineOffsetPx } else { 0 }
+            $underlineThickness = if ($level -eq 2) { [int]$Formatting.SectionHeadingUnderlineThicknessPx } else { 0 }
+            $underlineColor = if ($level -eq 2) { [string]$Formatting.SectionHeadingUnderlineColor } else { '' }
             $parentAdjacent = $false
             if ($level -eq 3 -and $Actions.Count -ge 2) {
                 $previousSpacer = $Actions[$Actions.Count - 1]
@@ -227,7 +254,16 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
                     $parentAdjacent = $true
                 }
             }
-            if (-not $parentAdjacent) {
+            $tableAdjacent = $false
+            if ($level -eq 2 -and $Actions.Count -ge 1) {
+                $previousBlock = $Actions[$Actions.Count - 1]
+                if ([string]$previousBlock.type -eq 'PasteRenderedAtomicBlock' -and [string]$previousBlock.blockRole -eq 'DataTable') {
+                    $previousBlock.postcondition | Add-Member -NotePropertyName requireDirectlyBeforeHeadingWhenApplicable -NotePropertyValue $true -Force
+                    $previousBlock.postcondition | Add-Member -NotePropertyName maximumRenderedHeadingGapPx -NotePropertyValue ([int]$Formatting.TableToHeadingPx) -Force
+                    $tableAdjacent = $true
+                }
+            }
+            if (-not $parentAdjacent -and -not $tableAdjacent) {
                 $Actions.Add([pscustomobject]@{
                     order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingTop'; headingLevel=$level
                     heightPx=$topPx; naverFontSizePx=16; naverLineHeightPercent=200
@@ -237,7 +273,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertStandaloneHeading'; level=$level
                 text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
-                fontSizePx=$fontSize; bold=$true; underline=$underline; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
+                fontSizePx=$fontSize; bold=$true; underline=$underline; underlineOffsetPx=$underlineOffset; underlineThicknessPx=$underlineThickness; underlineColor=$underlineColor; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
                 postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
             })
             $Actions.Add([pscustomobject]@{
@@ -249,13 +285,14 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
         }
         $type = if ($block -match '(?is)^<p\b') { 'PasteStandaloneParagraphBlock' } else { 'PasteRenderedAtomicBlock' }
         $isCallout = ($block -match '(?is)(?:data-blog-six-facts|background(?:-color)?\s*:)')
+        $blockRole = if ($block -match '(?is)\bsolidb-responsive-table\b') { 'DataTable' } elseif ($block -match '(?is)data-naver-role="reference-group"') { 'ReferenceGroup' } else { '' }
         if ($type -eq 'PasteStandaloneParagraphBlock') {
             $block = [regex]::Replace($block, '(?i)text-align\s*:\s*(?:left|justify)(?:\s*;\s*text-align-last\s*:\s*left)?', 'text-align:justify;text-align-last:left')
         }
         $BlockSequence.Value++
         $path = Write-NaverBlockFile -Block $block -Directory $BlockDirectory -Sequence $BlockSequence.Value
         $Actions.Add([pscustomobject]@{
-            order=$Order.Value++; type=$type; path=$path
+            order=$Order.Value++; type=$type; path=$path; blockRole=$blockRole
             formatting=[pscustomobject]@{
                 fontFamily=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [string]$Formatting.BodyFontFamily } else { $null })
                 fontSizePx=$(if ($type -eq 'PasteStandaloneParagraphBlock') { [int]$Formatting.BodyFontSizePx } else { $null })
@@ -320,6 +357,9 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
             $expectedTop = if ($level -eq 2) { [int]$Formatting.SectionHeadingTopPx } else { [int]$Formatting.SubheadingTopPx }
             $expectedBottom = if ($level -eq 2) { [int]$Formatting.SectionHeadingBottomPx } else { [int]$Formatting.SubheadingBottomPx }
             $validTop = ([string]$before.type -eq 'InsertVerticalSpacer' -and [string]$before.purpose -eq 'HeadingTop' -and [int]$before.heightPx -eq $expectedTop)
+            if ($level -eq 2 -and [string]$before.type -eq 'PasteRenderedAtomicBlock' -and [string]$before.blockRole -eq 'DataTable') {
+                $validTop = ([bool]$before.postcondition.requireDirectlyBeforeHeadingWhenApplicable -and [int]$before.postcondition.maximumRenderedHeadingGapPx -eq [int]$Formatting.TableToHeadingPx)
+            }
             if ($level -eq 3 -and [string]$before.purpose -eq 'ParentHeadingToSubheading') {
                 $validTop = ([int]$before.heightPx -eq [int]$Formatting.ParentHeadingToSubheadingPx)
             }
@@ -333,6 +373,9 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
                 -not [bool]$action.bold -or
                 ($level -eq 2 -and -not [bool]$action.underline) -or
                 ($level -eq 3 -and [bool]$action.underline) -or
+                ($level -eq 2 -and [int]$action.underlineOffsetPx -ne [int]$Formatting.SectionHeadingUnderlineOffsetPx) -or
+                ($level -eq 2 -and [int]$action.underlineThicknessPx -ne [int]$Formatting.SectionHeadingUnderlineThicknessPx) -or
+                ($level -eq 2 -and [string]$action.underlineColor -ne [string]$Formatting.SectionHeadingUnderlineColor) -or
                 ($level -eq 2 -and [int]$action.fontSizePx -ne [int]$Formatting.SectionHeadingFontSizePx) -or
                 ($level -eq 3 -and [int]$action.fontSizePx -ne [int]$Formatting.SubheadingFontSizePx) -or
                 -not [bool]$action.resetInlineFormattingBefore -or
@@ -423,9 +466,12 @@ function New-ComputerUseExecutionContract([object]$Plan) {
             requireSetStateNotToggle = $true
             requireToolbarPostconditionAfterEveryTextBlock = $true
             preserveListedInlineBoldLabels = $true
-            browserBinding = 'ChromeExtensionTab'
+            browserBinding = 'ChromeDevToolsDedicatedProfile'
             forbidWindowsAppWindowBinding = $true
             requireOuterAndInnerUrlMatch = $true
+            requireSingleReusableEditorTab = $true
+            computerUseUrlInspectionRequired = $false
+            directCdpUrlVerificationRequired = $true
             failClosedWhenUrlUncertain = $true
             selectionMode = 'NativeTripleClickRenderedParagraph'
             scrollMode = 'CenterVisibleOutsideFixedToolbar'

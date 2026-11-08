@@ -31,8 +31,9 @@ export function buildInsertionUnits(plan,readFile=p=>fs.readFileSync(p,'utf8')){
     else if(a.type==='InsertStandaloneHeading'){
       const size=Math.max(1,Number(a.fontSizePx)||15);
       const text=escapeHtml(a.text);
-      const decorated=a.underline?`<u>${text}</u>`:text;
-      units.push({type:'html',kind:'heading',html:`<p data-nte-heading-level="${Number(a.level)||2}" style="margin:0;font-size:${size}px;line-height:${Number(a.lineHeightPx)||27}px;text-align:left"><b>${decorated}</b></p>`,verifyText:a.text,fontSizePx:size,level:Number(a.level)||2,underline:!!a.underline});
+      const underlineStyle=`text-decoration-line:underline;text-decoration-thickness:${Number(a.underlineThicknessPx)||1}px;text-underline-offset:${Number(a.underlineOffsetPx)||2}px`;
+      const decorated=a.underline?`<span data-nte-heading-underline="true" style="color:${escapeHtml(a.underlineColor||'#3F6CD4')}"><u style="${underlineStyle}"><span style="color:#111">${text}</span></u></span>`:text;
+      units.push({type:'html',kind:'heading',html:`<p data-nte-heading-level="${Number(a.level)||2}" style="margin:0;font-size:${size}px;line-height:${Number(a.lineHeightPx)||27}px;text-align:left"><b>${decorated}</b></p>`,verifyText:a.text,fontSizePx:size,level:Number(a.level)||2,underline:!!a.underline,underlineOffsetPx:Number(a.underlineOffsetPx)||0,underlineThicknessPx:Number(a.underlineThicknessPx)||0,underlineColor:a.underlineColor||''});
     }
   }
   return units;
@@ -58,6 +59,12 @@ export function validatePlannedImagePaths(plan,manifest){
 }
 function escapeHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function normalizeText(s){return String(s??'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim()}
+function cssRgbFromHex(value){
+  const match=/^#([0-9a-f]{6})$/i.exec(String(value||''));
+  if(!match)return String(value||'').toLowerCase();
+  const n=Number.parseInt(match[1],16);
+  return `rgb(${(n>>16)&255}, ${(n>>8)&255}, ${n&255})`;
+}
 function atomicWrite(file,data){
   fs.mkdirSync(path.dirname(file),{recursive:true});
   const tmp=`${file}.tmp-${process.pid}-${Date.now()}`;
@@ -131,6 +138,23 @@ async function probeNewEditorAccess(cdp,writeUrl){
   }finally{
     await cdp.send('Target.closeTarget',{targetId:created.targetId}).catch(()=>{});
   }
+}
+async function getOrCreateAutomationEditorTarget(cdp,targets,writeUrl,blogId){
+  const candidates=targets.filter(t=>isAuthorizedNaverUrl(t.url,blogId,{allowWrite:true}));
+  const marked=[];
+  for(const target of candidates){
+    try{
+      const attached=await attach(cdp,target.targetId);
+      const marker=await currentUrl(cdp,attached.sessionId).then(async()=>evaluate(cdp,attached.sessionId,'window.name')).catch(()=> '');
+      if(marker==='NTE_AUTOMATION_EDITOR') marked.push(target);
+    }catch{}
+  }
+  if(marked.length>1) throw new Error('MULTIPLE_MARKED_EDITOR_TABS');
+  if(marked.length===1) return {target:marked[0],reused:true};
+  if(candidates.length>1) throw new Error('MULTIPLE_EDITOR_TABS_REQUIRE_SINGLE_TAB');
+  if(candidates.length===1) return {target:candidates[0],reused:true,claimed:true};
+  const created=await cdp.send('Target.createTarget',{url:writeUrl,newWindow:false});
+  return {target:{targetId:created.targetId,url:writeUrl,type:'page'},reused:false};
 }
 async function verifyOwnerLogin(cdp,attached,blogId){
   const expression=`(()=>({loggedIn:!!document.querySelector('#gnb_my'),owner:!!document.querySelector('a[href*="admin.blog.naver.com"],a[href*="/${blogId}/postwrite"],a[href*="/${blogId}?Redirect=Write"]'),url:location.href}))()`;
@@ -328,15 +352,20 @@ async function prepareEditor(cdp,attached,contextId,plan){
 }
 async function inspectEditor(cdp,attached,contextId,plan){
   const title=await evaluate(cdp,attached.sessionId,`(()=>document.querySelector('.se-documentTitle [contenteditable="true"],.se-title-text[contenteditable="true"],.se-documentTitle .se-text-paragraph')?.textContent.trim()||'')()`,contextId);
-  const headingSpecs=plan.actions.filter(a=>a.type==='InsertStandaloneHeading').map(a=>({text:normalizeText(a.text),level:Number(a.level),fontSizePx:Number(a.fontSizePx),underline:!!a.underline}));
+  const headingSpecs=plan.actions.filter(a=>a.type==='InsertStandaloneHeading').map(a=>({text:normalizeText(a.text),level:Number(a.level),fontSizePx:Number(a.fontSizePx),underline:!!a.underline,underlineOffsetPx:Number(a.underlineOffsetPx)||0,underlineThicknessPx:Number(a.underlineThicknessPx)||0,underlineColor:a.underlineColor||''}));
+  const ordered=[...plan.actions].sort((a,b)=>a.order-b.order);
+  const tableHeadingSpecs=[];
+  for(let i=0;i<ordered.length;i++) if(ordered[i].blockRole==='DataTable'){const next=ordered.slice(i+1).find(x=>x.type==='InsertStandaloneHeading');if(next)tableHeadingSpecs.push({text:normalizeText(next.text),maxGapPx:Number(ordered[i].postcondition?.maximumRenderedHeadingGapPx)||24})}
   const anchorSpecs=[];let nearestHeading='';
   for(const action of [...plan.actions].sort((a,b)=>a.order-b.order)){if(action.type==='InsertStandaloneHeading')nearestHeading=normalizeText(action.text);if(action.type==='InsertImageAnchor')anchorSpecs.push({anchorId:action.anchorId,heading:nearestHeading})}
-  const body=await evaluate(cdp,attached.sessionId,`(()=>{const root=document.querySelector('.se-main-container,article');if(!root)return null;const norm=s=>(s||'').replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim();const specs=${JSON.stringify(headingSpecs)};const ps=[...root.querySelectorAll('p')];const headingDetails=specs.map(s=>{const p=ps.find(x=>norm(x.textContent)===s.text);if(!p)return{...s,found:false};const leaf=p.querySelector('u,b,strong,span')||p;const r=p.getBoundingClientRect(),cs=getComputedStyle(leaf),u=p.querySelector('u'),b=p.querySelector('b,strong');return{...s,found:true,actualFontSizePx:parseFloat(cs.fontSize),fontWeight:cs.fontWeight,actualBold:!!b||parseFloat(cs.fontWeight)>=600,actualUnderline:!!u||cs.textDecorationLine.includes('underline'),top:r.top,bottom:r.bottom}});const nodes=[...root.querySelectorAll('p,img.se-image-resource')];const images=[...root.querySelectorAll('img.se-image-resource')].map(i=>{const r=i.getBoundingClientRect();const container=i.closest('.se-section-image,.se-component-content')||i.parentElement;const c=container.getBoundingClientRect();const index=nodes.indexOf(i);let prior=null;for(let n=index-1;n>=0;n--){if(nodes[n].tagName==='P'&&specs.some(s=>s.text===norm(nodes[n].textContent))){prior=nodes[n];break}}const pr=prior?.getBoundingClientRect();return{src:i.src,name:i.getAttribute('data-file-name')||i.alt||'',width:r.width,height:r.height,left:r.left,centered:Math.abs((r.left+r.width/2)-(c.left+c.width/2))<=2,nearestHeading:norm(prior?.textContent),headingGapPx:pr?Math.round((r.top-pr.bottom)*10)/10:null}});return{text:root.innerText,paragraphs:ps.map(p=>p.textContent),headingDetails,rawUrlVisible:/https?:\\/\\//.test(root.innerText),horizontalOverflow:root.scrollWidth>root.clientWidth+1,images,links:[...root.querySelectorAll('span.se-link[data-href],a[href]')].map(a=>({text:a.textContent.trim(),href:a.getAttribute('data-href')||a.href}))}})()`,contextId);
+  const body=await evaluate(cdp,attached.sessionId,`(()=>{const root=document.querySelector('.se-main-container,article');if(!root)return null;const norm=s=>(s||'').replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim();const headingText=p=>norm(p?.textContent);const px=v=>{const n=parseFloat(v);return Number.isFinite(n)?n:null};const specs=${JSON.stringify(headingSpecs)};const tableSpecs=${JSON.stringify(tableHeadingSpecs)};const ps=[...root.querySelectorAll('p')];const headingDetails=specs.map(s=>{const p=ps.find(x=>headingText(x)===s.text);if(!p)return{...s,found:false};const u=p.querySelector('u'),textLeaf=u?.querySelector('span')||u||p.querySelector('b,strong,span')||p;const r=p.getBoundingClientRect(),ur=u?.getBoundingClientRect(),tr=textLeaf.getBoundingClientRect(),cs=getComputedStyle(textLeaf),us=u?getComputedStyle(u):null,b=p.querySelector('b,strong');return{...s,found:true,actualFontSizePx:px(cs.fontSize),fontWeight:cs.fontWeight,actualBold:!!b||parseFloat(cs.fontWeight)>=600,actualUnderline:!!u||(us?.textDecorationLine||cs.textDecorationLine||'').includes('underline'),actualUnderlineOffsetPx:px(us?.textUnderlineOffset),actualUnderlineThicknessPx:px(us?.textDecorationThickness),actualUnderlineColor:us?.textDecorationColor||us?.color||'',underlineWidthPx:ur?Math.round(ur.width*10)/10:null,textWidthPx:Math.round(tr.width*10)/10,underlineExactTextWidth:!!ur&&Math.abs(ur.width-tr.width)<=1,top:r.top,bottom:r.bottom}});const tableHeadingGaps=tableSpecs.map(s=>{const p=ps.find(x=>headingText(x)===s.text),tables=[...root.querySelectorAll('table')].filter(t=>!norm(t.textContent).startsWith('참고자료 :')),table=tables.find(t=>{const tr=t.getBoundingClientRect(),hr=p?.getBoundingClientRect();return p&&tr.bottom<=hr.top&&hr.top-tr.bottom<200});if(!p||!table)return{...s,found:false};const tr=table.getBoundingClientRect(),hr=p.getBoundingClientRect();return{...s,found:true,gapPx:Math.round((hr.top-tr.bottom)*10)/10}});const ref=ps.find(p=>norm(p.textContent).startsWith('참고자료 :')),related=ps.find(p=>norm(p.textContent)==='관련 글');const refCell=ref?.closest('td'),relatedCell=related?.closest('td'),box=ref?.closest('table'),rr=ref?.getBoundingClientRect(),lr=related?.getBoundingClientRect(),bs=box?getComputedStyle(box):null;const referenceBox={found:!!(ref&&related&&box),sameCell:!!refCell&&refCell===relatedCell,gapPx:rr&&lr?Math.round((lr.top-rr.bottom)*10)/10:null,borderWidthPx:px(bs?.borderTopWidth),borderColor:bs?.borderTopColor||'',backgroundColor:bs?.backgroundColor||''};const nodes=[...root.querySelectorAll('p,img.se-image-resource')];const images=[...root.querySelectorAll('img.se-image-resource')].map(i=>{const r=i.getBoundingClientRect();const container=i.closest('.se-section-image,.se-component-content')||i.parentElement;const c=container.getBoundingClientRect();const index=nodes.indexOf(i);let prior=null;for(let n=index-1;n>=0;n--){if(nodes[n].tagName==='P'&&specs.some(s=>s.text===headingText(nodes[n]))){prior=nodes[n];break}}const pr=prior?.getBoundingClientRect();return{src:i.src,name:i.getAttribute('data-file-name')||i.alt||'',width:r.width,height:r.height,left:r.left,centered:Math.abs((r.left+r.width/2)-(c.left+c.width/2))<=2,nearestHeading:headingText(prior),headingGapPx:pr?Math.round((r.top-pr.bottom)*10)/10:null}});return{text:root.innerText,paragraphs:ps.map(p=>headingText(p)),headingDetails,tableHeadingGaps,referenceBox,referenceToRelatedGapPx:referenceBox.gapPx,rawUrlVisible:/https?:\\/\\//.test(root.innerText),horizontalOverflow:root.scrollWidth>root.clientWidth+1,images,links:[...root.querySelectorAll('span.se-link[data-href],a[href]')].map(a=>({text:a.textContent.trim(),href:a.getAttribute('data-href')||a.href}))}})()`,contextId);
   const headingsVerified=headingSpecs.every(h=>body?.paragraphs?.filter(p=>normalizeText(p)===h.text).length===1);
-  const hierarchyVerified=body?.headingDetails?.every(h=>h.found&&h.actualBold&&Math.abs(h.actualFontSizePx-h.fontSizePx)<=1&&h.actualUnderline===h.underline)??false;
+  const hierarchyVerified=body?.headingDetails?.every(h=>{const actual=String(h.actualUnderlineColor).toLowerCase();const colorPreserved=actual===cssRgbFromHex(h.underlineColor);const naverNativeFallback=actual==='rgb(17, 17, 17)';return h.found&&h.actualBold&&Math.abs(h.actualFontSizePx-h.fontSizePx)<=1&&h.actualUnderline===h.underline&&(!h.underline||(h.underlineExactTextWidth&&(colorPreserved||naverNativeFallback)))})??false;
+  const tableHeadingSpacingVerified=body?.tableHeadingGaps?.every(x=>x.found&&x.gapPx<=x.maxGapPx)??false;
+  const referenceSpacingVerified=!!body?.referenceBox?.found&&body.referenceBox.sameCell&&body.referenceBox.borderWidthPx>=0.5&&body.referenceToRelatedGapPx!==null&&body.referenceToRelatedGapPx>=0&&body.referenceToRelatedGapPx<=8;
   const expectedImageHeadings=anchorSpecs.map(x=>x.heading);
   const imagePlacementVerified=(body?.images?.length===expectedImageHeadings.length)&&body.images.every((img,index)=>index===0||img.nearestHeading===expectedImageHeadings[index]&&(img.headingGapPx===null||img.headingGapPx<=24));
-  return {title,body,headingsVerified,hierarchyVerified,imagePlacementVerified,expectedImageHeadings};
+  return {title,body,headingsVerified,hierarchyVerified,tableHeadingSpacingVerified,referenceSpacingVerified,imagePlacementVerified,expectedImageHeadings};
 }
 async function inspectEditableDom(cdp,attached){
   const rows=[];
@@ -395,22 +424,25 @@ async function main(){
     const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);const imageManifest=readJson(pkg.imageManifest);validatePlannedImagePaths(plan,imageManifest);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
     const missingImages=plan.actions.filter(x=>x.type==='UploadImageAtAnchor'&&!fs.existsSync(x.path)).map(x=>x.path);
     if(missingImages.length){atomicWrite(a.result,{status:'Blocked',reason:'IMAGE_FILES_REQUIRED',missingImages,publicationSettingsOpened:false,published:false});return}
-    const created=await cdp.send('Target.createTarget',{url:a['write-url'],newWindow:false});
-    await cdp.send('Target.activateTarget',{targetId:created.targetId});
-    const attached=await attach(cdp,created.targetId);
+    const editorSelection=await getOrCreateAutomationEditorTarget(cdp,targets,a['write-url'],a['blog-id']);
+    const editorTarget=editorSelection.target;
+    await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
+    const attached=await attach(cdp,editorTarget.targetId);
     let context;
     try{context=await findEditorContext(cdp,attached)}catch(e){
       const outer=await currentUrl(cdp,attached.sessionId).catch(()=> '');
-      if(/nid\.naver\.com/.test(outer)) await cdp.send('Target.closeTarget',{targetId:created.targetId}).catch(()=>{});
+      if(/nid\.naver\.com/.test(outer)&&!editorSelection.reused) await cdp.send('Target.closeTarget',{targetId:editorTarget.targetId}).catch(()=>{});
       throw e;
     }
     const outer=await currentUrl(cdp,attached.sessionId);
-    if(/nid\.naver\.com/.test(outer)){await cdp.send('Target.closeTarget',{targetId:created.targetId}).catch(()=>{});atomicWrite(a.result,{status:'Blocked',reason:'NAVER_LOGIN_REQUIRED',publicationSettingsOpened:false,published:false});return}
+    if(/nid\.naver\.com/.test(outer)){if(!editorSelection.reused)await cdp.send('Target.closeTarget',{targetId:editorTarget.targetId}).catch(()=>{});atomicWrite(a.result,{status:'Blocked',reason:'NAVER_LOGIN_REQUIRED',publicationSettingsOpened:false,published:false});return}
     assertNewPostSafety(outer,a['blog-id']);
+    await evaluate(cdp,attached.sessionId,`window.name='NTE_AUTOMATION_EDITOR';true`).catch(()=>{});
     await dismissRecoveryDialog(cdp,attached.sessionId,context.contextId);
-    await cdp.send('Target.activateTarget',{targetId:created.targetId});
+    await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
     await sleep(600);
     const prepared=await prepareEditor(cdp,attached,context.contextId,plan);
+    const stabilizedServerImages=await inspectImagesSequentially(cdp,attached,context.contextId,prepared.imageUploadCount);
     await cleanEditorView(cdp,attached,context.contextId);
     const observed=await inspectEditor(cdp,attached,context.contextId,plan);
     const pc=path.join(a['run-dir'],'pc.png');await capture(cdp,attached.sessionId,pc);
@@ -420,15 +452,15 @@ async function main(){
     const measurement=path.join(a['run-dir'],'measurement.json');
     const pcImages=observed.body?.images||[];const mobileImages=mobileObserved.body?.images||[];
     const uploaded=prepared.uploadedImages||[];
-    const imagesVerified=prepared.imageUploadCount===pcImages.length&&prepared.imageUploadCount===mobileImages.length&&uploaded.length===prepared.imageUploadCount&&uploaded.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered);
-    const imageFileNames=uploaded.map(i=>path.basename(i.sourcePath));const imageServerUrls=uploaded.map(i=>i.src);
-    const m={schemaVersion:1,measurementSource:'RenderedNaverDomAndScreen',pc:{horizontalOverflow:!!observed.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:pcImages.map(i=>i.width),imagesCentered:pcImages.map(i=>i.centered),imageHeadingGaps:pcImages.map(i=>i.headingGapPx),imageNearestHeadings:pcImages.map(i=>i.nearestHeading),headingDetails:observed.body?.headingDetails||[],rawUrlVisible:!!observed.body?.rawUrlVisible,sourceLinks:observed.body?.links||[]},mobile:{horizontalOverflow:!!mobileObserved.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:mobileImages.map(i=>i.width),imagesCentered:mobileImages.map(i=>i.centered),imageHeadingGaps:mobileImages.map(i=>i.headingGapPx),imageNearestHeadings:mobileImages.map(i=>i.nearestHeading),headingDetails:mobileObserved.body?.headingDetails||[],rawUrlVisible:!!mobileObserved.body?.rawUrlVisible},secondPass:{wholeArticleFromStart:true,titleVerified:normalizeText(observed.title)===normalizeText(plan.title),bodyVerified:!!observed.body?.text,headingsVerified:observed.headingsVerified,hierarchyVerified:observed.hierarchyVerified&&mobileObserved.hierarchyVerified,imagePlacementVerified:observed.imagePlacementVerified&&mobileObserved.imagePlacementVerified,imagesVerified,linksVerified:(observed.body?.links?.length||0)>0}};
+    const imagesVerified=prepared.imageUploadCount===pcImages.length&&prepared.imageUploadCount===mobileImages.length&&uploaded.length===prepared.imageUploadCount&&stabilizedServerImages.length===prepared.imageUploadCount&&uploaded.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered)&&stabilizedServerImages.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered);
+    const imageFileNames=uploaded.map(i=>path.basename(i.sourcePath));const imageServerUrls=stabilizedServerImages.map(i=>i.src);
+    const m={schemaVersion:1,measurementSource:'RenderedNaverDomAndScreen',pc:{horizontalOverflow:!!observed.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:pcImages.map(i=>i.width),imagesCentered:pcImages.map(i=>i.centered),imageHeadingGaps:pcImages.map(i=>i.headingGapPx),imageNearestHeadings:pcImages.map(i=>i.nearestHeading),headingDetails:observed.body?.headingDetails||[],tableHeadingGaps:observed.body?.tableHeadingGaps||[],referenceBox:observed.body?.referenceBox||null,referenceToRelatedGapPx:observed.body?.referenceToRelatedGapPx??null,rawUrlVisible:!!observed.body?.rawUrlVisible,sourceLinks:observed.body?.links||[]},mobile:{horizontalOverflow:!!mobileObserved.body?.horizontalOverflow,imageFileNames,imageServerUrls,imageWidths:mobileImages.map(i=>i.width),imagesCentered:mobileImages.map(i=>i.centered),imageHeadingGaps:mobileImages.map(i=>i.headingGapPx),imageNearestHeadings:mobileImages.map(i=>i.nearestHeading),headingDetails:mobileObserved.body?.headingDetails||[],tableHeadingGaps:mobileObserved.body?.tableHeadingGaps||[],referenceBox:mobileObserved.body?.referenceBox||null,referenceToRelatedGapPx:mobileObserved.body?.referenceToRelatedGapPx??null,rawUrlVisible:!!mobileObserved.body?.rawUrlVisible},secondPass:{wholeArticleFromStart:true,titleVerified:normalizeText(observed.title)===normalizeText(plan.title),bodyVerified:!!observed.body?.text,headingsVerified:observed.headingsVerified,hierarchyVerified:observed.hierarchyVerified&&mobileObserved.hierarchyVerified,tableHeadingSpacingVerified:observed.tableHeadingSpacingVerified&&mobileObserved.tableHeadingSpacingVerified,referenceSpacingVerified:observed.referenceSpacingVerified&&mobileObserved.referenceSpacingVerified,imagePlacementVerified:observed.imagePlacementVerified&&mobileObserved.imagePlacementVerified,imagesVerified,linksVerified:(observed.body?.links?.length||0)>0}};
     atomicWrite(measurement,m);
     if(a['allow-tag-only-publication-settings']!=='true'){
-      atomicWrite(a.result,{status:'Blocked',reason:'CONTENT_AND_IMAGES_VERIFIED_TAGS_REQUIRE_EXPLICIT_SETTINGS_APPROVAL',editorUrl:outer,publicationSettingsOpened:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:false,formatVerified:m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.imagePlacementVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:false,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement});
+      atomicWrite(a.result,{status:'Blocked',reason:'CONTENT_AND_IMAGES_VERIFIED_TAGS_REQUIRE_EXPLICIT_SETTINGS_APPROVAL',editorUrl:outer,publicationSettingsOpened:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:false,formatVerified:m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.tableHeadingSpacingVerified&&m.secondPass.referenceSpacingVerified&&m.secondPass.imagePlacementVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:false,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement});
       return;
     }
-    await cdp.send('Target.activateTarget',{targetId:created.targetId});
+    await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
     const tagEvidence=await applyTagsOnly(cdp,attached,context.contextId,plan.tags,plan.runDir);
     const finalServerImages=await inspectImagesSequentially(cdp,attached,context.contextId,prepared.imageUploadCount);
     await cleanEditorView(cdp,attached,context.contextId);
@@ -439,14 +471,14 @@ async function main(){
     await cdp.send('Emulation.clearDeviceMetricsOverride',{},attached.sessionId);await cleanEditorView(cdp,attached,context.contextId);
     m.pc.horizontalOverflow=!!finalObserved.body?.horizontalOverflow;m.pc.imageServerUrls=finalServerImages.map(i=>i.src);m.pc.imageWidths=finalServerImages.map(i=>i.width);m.pc.imagesCentered=finalServerImages.map(i=>i.centered);m.pc.rawUrlVisible=!!finalObserved.body?.rawUrlVisible;m.pc.sourceLinks=finalObserved.body?.links||[];
     m.mobile.horizontalOverflow=!!finalMobileObserved.body?.horizontalOverflow;m.mobile.imageServerUrls=finalServerImages.map(i=>i.src);m.mobile.imageWidths=(finalMobileObserved.body?.images||[]).map(i=>i.width);m.mobile.imagesCentered=(finalMobileObserved.body?.images||[]).map(i=>i.centered);m.mobile.rawUrlVisible=!!finalMobileObserved.body?.rawUrlVisible;
-    m.secondPass.titleVerified=normalizeText(finalObserved.title)===normalizeText(plan.title);m.secondPass.bodyVerified=!!finalObserved.body?.text;m.secondPass.headingsVerified=finalObserved.headingsVerified;m.secondPass.hierarchyVerified=finalObserved.hierarchyVerified&&finalMobileObserved.hierarchyVerified;m.secondPass.imagePlacementVerified=finalObserved.imagePlacementVerified&&finalMobileObserved.imagePlacementVerified;m.secondPass.linksVerified=(finalObserved.body?.links?.length||0)>0;
+    m.secondPass.titleVerified=normalizeText(finalObserved.title)===normalizeText(plan.title);m.secondPass.bodyVerified=!!finalObserved.body?.text;m.secondPass.headingsVerified=finalObserved.headingsVerified;m.secondPass.hierarchyVerified=finalObserved.hierarchyVerified&&finalMobileObserved.hierarchyVerified;m.secondPass.tableHeadingSpacingVerified=finalObserved.tableHeadingSpacingVerified&&finalMobileObserved.tableHeadingSpacingVerified;m.secondPass.referenceSpacingVerified=finalObserved.referenceSpacingVerified&&finalMobileObserved.referenceSpacingVerified;m.secondPass.imagePlacementVerified=finalObserved.imagePlacementVerified&&finalMobileObserved.imagePlacementVerified;m.secondPass.linksVerified=(finalObserved.body?.links?.length||0)>0;
     const finalImagesVerified=finalServerImages.length===prepared.imageUploadCount&&(finalObserved.body?.images||[]).length===prepared.imageUploadCount&&(finalMobileObserved.body?.images||[]).length===prepared.imageUploadCount&&finalServerImages.every(i=>/^https:\/\/blogfiles\.pstatic\.net\//.test(i.src)&&Math.abs(i.width-400)<=2&&i.centered)&&(finalMobileObserved.body?.images||[]).every(i=>Math.abs(i.width-400)<=2&&i.centered);
     m.secondPass.imagesVerified=finalImagesVerified;
     m.secondPass.tagsVerified=tagEvidence.tags.length===plan.tags.length;
     m.tagEvidence=tagEvidence;
     atomicWrite(measurement,m);
-    const allVerified=imagesVerified&&finalImagesVerified&&m.secondPass.titleVerified&&m.secondPass.bodyVerified&&m.secondPass.linksVerified&&m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.imagePlacementVerified&&m.secondPass.tagsVerified&&!m.pc.horizontalOverflow&&!m.mobile.horizontalOverflow;
-    atomicWrite(a.result,{status:allVerified?'Verified':'Blocked',reason:allVerified?'TAG_ONLY_SETTINGS_VERIFIED_AND_CLOSED':'FINAL_VERIFICATION_FAILED',editorUrl:outer,publicationSettingsOpened:false,publicationSettingsEverOpenedForTags:true,publicationSettingsPurpose:'TagsOnly',visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:m.secondPass.tagsVerified,formatVerified:m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.imagePlacementVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:allVerified,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement,observedTags:tagEvidence.tags});
+    const allVerified=imagesVerified&&finalImagesVerified&&m.secondPass.titleVerified&&m.secondPass.bodyVerified&&m.secondPass.linksVerified&&m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.tableHeadingSpacingVerified&&m.secondPass.referenceSpacingVerified&&m.secondPass.imagePlacementVerified&&m.secondPass.tagsVerified&&!m.pc.horizontalOverflow&&!m.mobile.horizontalOverflow;
+    atomicWrite(a.result,{status:allVerified?'Verified':'Blocked',reason:allVerified?'TAG_ONLY_SETTINGS_VERIFIED_AND_CLOSED':'FINAL_VERIFICATION_FAILED',editorUrl:outer,publicationSettingsOpened:false,publicationSettingsEverOpenedForTags:true,publicationSettingsPurpose:'TagsOnly',visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false,published:false,imagesGenerated:imagesVerified,imagesOptimized:imagesVerified,imagesUploaded:imagesVerified,titleVerified:m.secondPass.titleVerified,bodyVerified:m.secondPass.bodyVerified,linksVerified:m.secondPass.linksVerified,tagsVerified:m.secondPass.tagsVerified,formatVerified:m.secondPass.headingsVerified&&m.secondPass.hierarchyVerified&&m.secondPass.tableHeadingSpacingVerified&&m.secondPass.referenceSpacingVerified&&m.secondPass.imagePlacementVerified,mobileVerified:!m.mobile.horizontalOverflow,secondPassVerified:allVerified,pcScreenshot:pc,mobileScreenshot:mobile,measurementFile:measurement,observedTags:tagEvidence.tags});
   } finally {cdp.close()}
 }
 // Windows의 한글/공백/OneDrive 경로는 argv 경로와 import.meta.url의 문자열 표현이

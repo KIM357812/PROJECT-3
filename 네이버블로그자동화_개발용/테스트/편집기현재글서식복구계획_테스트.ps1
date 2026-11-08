@@ -23,7 +23,7 @@ try {
     if ($result.schemaVersion -ne 3) { throw '복구 계약 스키마 버전 오류' }
     if (-not (Test-Path -LiteralPath $result.executor.modulePath) -or $result.executor.method -ne 'run') { throw '실제 실행 모듈 연결 누락' }
     $verifyEditor=@($result.actions | Where-Object action -eq 'VerifyNewPostEditor')
-    if ($verifyEditor.Count -ne 1 -or $verifyEditor[0].browserBinding -ne 'ChromeExtensionTab' -or -not $verifyEditor[0].forbidWindowsAppWindowBinding -or -not $verifyEditor[0].requireOuterAndInnerUrlMatch) { throw 'Chrome 확장 탭 URL 이중 검증 가드 누락' }
+    if ($verifyEditor.Count -ne 1 -or $verifyEditor[0].browserBinding -ne 'ChromeDevToolsDedicatedProfile' -or -not $verifyEditor[0].forbidWindowsAppWindowBinding -or -not $verifyEditor[0].requireOuterAndInnerUrlMatch -or -not $verifyEditor[0].requireSingleReusableEditorTab -or [bool]$verifyEditor[0].computerUseUrlInspectionRequired -or -not [bool]$verifyEditor[0].directCdpUrlVerificationRequired) { throw 'Chrome 직접 연결·단일 편집 탭 가드 누락' }
     if (@($result.actions | Where-Object action -eq 'NormalizeAllBodyText').Count -ne 0) { throw '혼합 서식에서 위험한 전체 굵기 토글이 남아 있습니다.' }
     $body=@($result.actions | Where-Object action -eq 'ApplyBodyParagraphByExactText')
     if ($body.Count -ne 1 -or $body[0].text -ne '일반 본문 문단' -or $body[0].mutationMode -ne 'SetStateNotToggle' -or $body[0].selectionMode -ne 'NativeTripleClickRenderedParagraph' -or -not $body[0].forbidAccessibilitySelectText -or $body[0].postcondition.requiredFontClass -ne 'se-fs15' -or $body[0].postcondition.forbiddenFontClass -ne 'se-fs30' -or $body[0].postcondition.expectedBoldElementCount -ne 0) { throw '일반 문단 네이티브 선택·DOM 서식 복구 동작 누락' }

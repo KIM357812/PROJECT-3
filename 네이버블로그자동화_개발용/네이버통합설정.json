@@ -99,7 +99,13 @@
     "ParentHeadingToSubheadingPx": 12,
     "HeadingToImagePx": 12,
     "SectionHeadingUnderline": true,
+    "SectionHeadingUnderlineOffsetPx": 2,
+    "SectionHeadingUnderlineThicknessPx": 1,
+    "SectionHeadingUnderlineColor": "#3F6CD4",
+    "SectionHeadingUnderlineColorMode": "PreferLinkBlueFallbackNaverNativeTextColor",
     "SubheadingUnderline": false,
+    "TableToHeadingPx": 30,
+    "ReferenceToRelatedPx": 6,
     "KnownAcronymAllowlist": [
       "AI",
       "IT",

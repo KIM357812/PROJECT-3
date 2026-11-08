@@ -63,7 +63,8 @@ $actions = New-Object 'System.Collections.Generic.List[object]'
 $sequence = 1
 $actions.Add([pscustomobject]@{
     sequence=$sequence++; action='VerifyNewPostEditor'; forbidExistingPost=$true
-    browserBinding='ChromeExtensionTab'; forbidWindowsAppWindowBinding=$true
+    browserBinding='ChromeDevToolsDedicatedProfile'; forbidWindowsAppWindowBinding=$true
+    requireSingleReusableEditorTab=$true; computerUseUrlInspectionRequired=$false; directCdpUrlVerificationRequired=$true
     outerUrl='https://blog.naver.com/ij1128?Redirect=Write&'; innerFrameUrlPattern='https://blog.naver.com/*/postwrite*'
     requireOuterAndInnerUrlMatch=$true; failClosedWhenUrlUncertain=$true
 })

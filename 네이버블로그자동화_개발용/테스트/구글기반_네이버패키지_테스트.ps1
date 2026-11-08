@@ -13,7 +13,9 @@ function Assert-True([bool]$Condition, [string]$Message) {
 try {
     New-Item -ItemType Directory -Path $source,$work -Force | Out-Null
     $image = '<div data-blog-image-wrap="true" style="text-align:center;margin:28px 0 28px 0"><img src="data:image/svg+xml;base64,PHN2Zy8+" alt="장면" title="장면"></div>'
-    $html = '<div style="width:100%;max-width:800px;margin:0 auto"><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 첫 문단</p><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 둘째 문단</p>' + $image + '<h2 style="font-size:22px;border-bottom:2px solid #000">현황</h2><div style="background:#eee"><p style="line-height:1.6;margin:0 0 8px 0;font-weight:700">강조 제목</p><p style="line-height:1.6">강조 본문</p></div>' + $image + '<h3>분석</h3>' + $image + '<p>전망</p>' + $image + '<div data-blog-sources="true" style="margin:20px 0"><p><strong>출처 :</strong> 링크</p></div></div>'
+    $table = '<div class="solidb-responsive-table" style="margin:25px 0"><table><thead><tr><th>항목</th><th>값</th></tr></thead><tbody><tr><td data-label="항목">시험</td><td data-label="값">1</td></tr></tbody></table></div>'
+    $related = '<div data-blog-related="true" style="margin:14px 0 0 0"><p>관련 글</p><p><a href="https://blog.naver.com/ij1128/1">이전 글</a></p></div>'
+    $html = '<div style="width:100%;max-width:800px;margin:0 auto"><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 첫 문단</p><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 둘째 문단</p>' + $image + $table + '<h2 style="font-size:22px;border-bottom:2px solid #000">현황</h2><div style="background:#eee"><p style="line-height:1.6;margin:0 0 8px 0;font-weight:700">강조 제목</p><p style="line-height:1.6">강조 본문</p></div>' + $image + '<h3>분석</h3>' + $image + '<p>전망</p>' + $image + '<div data-blog-sources="true" style="margin:20px 0"><p><strong>출처 :</strong> 링크</p></div>' + $related + '</div>'
     Set-Content -LiteralPath (Join-Path $source 'Blogger에_붙여넣을_본문.html') -Value $html -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '메타데이터.txt') -Value "## 5. 해시태그`nAI, 데이터센터, 전력망, 에너지, 기술동향`n## 6. 내부 사실검증표" -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '사실검증표.md') -Value '검증 완료' -Encoding UTF8
@@ -63,10 +65,12 @@ try {
         $afterHeading = @($plan.actions)[$position + 1]
         $expectedTop = if ($headingAction.level -eq 2) { 32 } else { 24 }
         $expectedBottom = if ($headingAction.level -eq 2) { 21 } else { 12 }
-        Assert-True ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq $expectedTop) "H$($headingAction.level) 위 독립 간격"
+        $validBefore = ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq $expectedTop) -or ($headingAction.level -eq 2 -and $beforeAction.blockRole -eq 'DataTable' -and $beforeAction.postcondition.maximumRenderedHeadingGapPx -eq 30)
+        Assert-True $validBefore "H$($headingAction.level) 위 독립 간격"
         $validAfter = ($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom' -and $afterHeading.heightPx -eq $expectedBottom) -or ($afterHeading.type -eq 'InsertImageAnchor' -and [bool]$afterHeading.postcondition.requireDirectlyAfterHeadingWhenApplicable)
         Assert-True $validAfter "H$($headingAction.level) 아래 간격 또는 직접 이미지 연결"
         Assert-True (($headingAction.level -eq 2 -and $headingAction.fontSizePx -eq 19 -and [bool]$headingAction.underline) -or ($headingAction.level -eq 3 -and $headingAction.fontSizePx -eq 16 -and -not [bool]$headingAction.underline)) 'H2/H3 크기·밑줄 계층'
+        if ($headingAction.level -eq 2) { Assert-True ($headingAction.underlineOffsetPx -eq 2 -and $headingAction.underlineThicknessPx -eq 1 -and $headingAction.underlineColor -eq '#3F6CD4') 'H2 제목 폭 밑줄 2px 오프셋·1px 링크 파란색 기준' }
         Assert-True ([bool]$headingAction.postcondition.requireStandaloneParagraph) '소제목 독립 문단 사후조건'
         Assert-True ([bool]$headingAction.postcondition.forbidMergedPreviousText -and [bool]$headingAction.postcondition.forbidMergedNextText) '소제목 앞뒤 본문 합침 금지'
     }
@@ -85,7 +89,7 @@ try {
     Assert-True ([bool]$contract.guards.requireWholeEditorAuditBeforeStop -and [bool]$contract.guards.rejectInheritedBoldBody) '전체 감사와 굵기 상속 차단 실행 가드'
     Assert-True ([bool]$contract.guards.forbidGlobalMixedSelectionBoldToggle -and [bool]$contract.guards.requireExactParagraphSelection -and [bool]$contract.guards.requireSetStateNotToggle -and [bool]$contract.guards.requireToolbarPostconditionAfterEveryTextBlock) '문단별 멱등 서식 실행 가드'
     Assert-True ([bool]$contract.guards.preserveListedInlineBoldLabels) '육하원칙 등 부분 굵기 라벨 보존 가드'
-    Assert-True ($contract.guards.browserBinding -eq 'ChromeExtensionTab' -and [bool]$contract.guards.forbidWindowsAppWindowBinding -and [bool]$contract.guards.requireOuterAndInnerUrlMatch) 'Chrome 확장 탭 URL 이중 검증 가드'
+    Assert-True ($contract.guards.browserBinding -eq 'ChromeDevToolsDedicatedProfile' -and [bool]$contract.guards.forbidWindowsAppWindowBinding -and [bool]$contract.guards.requireOuterAndInnerUrlMatch -and [bool]$contract.guards.requireSingleReusableEditorTab -and -not [bool]$contract.guards.computerUseUrlInspectionRequired -and [bool]$contract.guards.directCdpUrlVerificationRequired) 'Chrome 직접 연결·단일 편집 탭 재사용 가드'
     Assert-True ($contract.guards.selectionMode -eq 'NativeTripleClickRenderedParagraph' -and [bool]$contract.guards.forbidAccessibilitySelectText -and [bool]$contract.guards.requireRenderedDomPostcondition -and [bool]$contract.guards.rejectToolbarOnlyAudit) '실제 문단 선택·DOM 사후검증 가드'
     Assert-True ($contract.guards.requiredBodyFontClass -eq 'se-fs15' -and $contract.guards.forbiddenBodyFontClass -eq 'se-fs30' -and $contract.guards.requiredBodyBoldElementCount -eq 0 -and $contract.guards.maxRepairPasses -eq 2) '본문 글자 크기·굵기·복구 횟수 가드'
     $blockFiles = @(Get-ChildItem -LiteralPath (Join-Path $result.outputRoot 'blocks') -Filter '*.html')
@@ -101,11 +105,15 @@ try {
     Assert-True ($segmentText -match 'line-height:27px') '본문 27px 줄높이 기준'
     Assert-True ($segmentText -match 'line-height:24px') '바탕색 상자 24px 줄높이 기준'
     Assert-True ($segmentText -match 'margin:32px 0 0 0') '참고자료 위 32px 기준'
+    Assert-True ($segmentText -match 'text-underline-offset:2px' -and $segmentText -match 'text-decoration-thickness:1px' -and $segmentText -match 'text-decoration-color:#3F6CD4') 'H2 글자 폭 밑줄·2px 간격·파란색 기준'
+    Assert-True ($segmentText -match '<table data-naver-role="reference-group"' -and $segmentText -match 'border:1px solid #D9DDE3' -and $segmentText -match 'data-nte-reference-gap="true" style="display:block;height:6px;' -and $segmentText -notmatch 'aria-hidden="true"') '참고자료·관련 글 단일 무배경 테두리 상자와 6px 내부 간격'
+    $tableActions = @($plan.actions | Where-Object blockRole -eq 'DataTable')
+    Assert-True ($tableActions.Count -eq 1 -and [bool]$tableActions[0].postcondition.requireDirectlyBeforeHeadingWhenApplicable -and $tableActions[0].postcondition.maximumRenderedHeadingGapPx -eq 30) '표 다음 H2 실제 간격 30px 이하 실행 조건'
     Assert-True ($segmentText -match '참고자료 :') '참고자료 표기 기준'
     Assert-True ($blockText -match 'text-align\s*:\s*justify' -and $blockText -match 'text-align-last\s*:\s*left') '본문 오른쪽 끝 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
     $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
-    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지')) {
+    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 오프셋 2px','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 테두리')) {
         Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
     }
     Assert-True ($promptText -match '(?i)text-align:\s*justify\s*;\s*text-align-last:\s*left') '프롬프트 본문 양쪽 정렬과 마지막 줄 왼쪽 정렬'
