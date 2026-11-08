@@ -16,7 +16,7 @@ test('plan becomes atomic units and never merges headings with body',()=>{
   const plan={actions:[
     {order:1,type:'PasteStandaloneParagraphBlock',path:'body'},
     {order:2,type:'InsertVerticalSpacer',heightPx:32},
-    {order:3,type:'InsertStandaloneHeading',text:'소제목',fontSizePx:19},
+    {order:3,type:'InsertStandaloneHeading',text:'소제목',fontSizePx:19,lineHeightPx:27,level:2,underline:true},
     {order:4,type:'InsertVerticalSpacer',heightPx:21},
     {order:5,type:'InsertImageAnchor',anchorId:'I1',text:'[[I1]]'}
   ]};
@@ -25,6 +25,9 @@ test('plan becomes atomic units and never merges headings with body',()=>{
   assert.deepEqual(units.map(x=>x.kind),['PasteStandaloneParagraphBlock','spacer','heading','spacer','image-anchor']);
   assert.equal(units[2].verifyText,'소제목');
   assert.equal(units[0].html.includes('소제목'),false);
+  assert.match(units[1].html,/font-size:32px;line-height:32px/);
+  assert.match(units[2].html,/font-size:19px/);
+  assert.match(units[2].html,/<u>소제목<\/u>/);
 });
 test('clipboard unit keeps only body fragment and never leaks HTML title',()=>{
   const fragment=extractHtmlBodyFragment('<!doctype html><html><head><title>네이버 독립 입력 블록 9</title></head><body><p>실제 본문</p><script>bad()</script></body></html>');

@@ -63,9 +63,10 @@ function Get-Tags([string]$Metadata) {
 
 function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     $result = [regex]::Replace($Fragment, '(?is)<style\b[^>]*>.*?</style>', '')
+    $result = [regex]::Replace($result, '(?i)font-size\s*:\s*16px', ('font-size:{0}px' -f [int]$Formatting.BodyFontSizePx))
     $result = [regex]::Replace($result, '(?is)<h2\b[^>]*>(?<text>.*?)</h2>', {
         param($match)
-        '<div data-naver-role="section-heading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;color:#111;text-align:left;word-break:keep-all;">{3}</p></div>' -f
+        '<div data-naver-role="section-heading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;text-decoration:underline;text-underline-offset:4px;color:#111;text-align:left;word-break:keep-all;">{3}</p></div>' -f
             [int]$Formatting.SectionHeadingTopPx,
             [int]$Formatting.SectionHeadingBottomPx,
             [int]$Formatting.SectionHeadingFontSizePx,
@@ -74,12 +75,11 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     $result = [regex]::Replace($result, '(?is)<h3\b[^>]*>(?<text>.*?)</h3>', {
         param($match)
         '<div data-naver-role="subheading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;color:#222;text-align:left;word-break:keep-all;">{3}</p></div>' -f
-            [int]$Formatting.SectionHeadingTopPx,
-            [int]$Formatting.SectionHeadingBottomPx,
+            [int]$Formatting.SubheadingTopPx,
+            [int]$Formatting.SubheadingBottomPx,
             [int]$Formatting.SubheadingFontSizePx,
             $match.Groups['text'].Value
     })
-    $result = [regex]::Replace($result, '(?i)font-size\s*:\s*16px', ('font-size:{0}px' -f [int]$Formatting.BodyFontSizePx))
     $result = [regex]::Replace($result, '(?i)line-height\s*:\s*1\.75', ('line-height:{0}px' -f [int]$Formatting.BodyLineHeightPx))
     $result = [regex]::Replace($result, '(?i)line-height\s*:\s*1\.6', ('line-height:{0}px' -f [int]$Formatting.CalloutLineHeightPx))
     $result = [regex]::Replace($result, '(?i)margin\s*:\s*0\s+0\s+18px\s+0', ('margin:0 0 {0}px 0' -f [int]$Formatting.ParagraphBottomPx))
@@ -92,6 +92,56 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
         '<div data-blog-sources="true" data-naver-role="references" style="margin:{0}px 0 0 0;{1}">' -f [int]$Formatting.ReferenceTopPx, $style
     })
     return $result.Trim()
+}
+
+function Apply-NaverReaderTermRules([string]$Html) {
+    $result = $Html
+    $metrPattern = [regex]::new('(?:비영리\s+(?:AI\s+)?평가기관\s+)?<strong>\s*METR\s*</strong>|(?:비영리\s+(?:AI\s+)?평가기관\s+)?METR', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $result = $metrPattern.Replace($result, '<strong data-primary-source-identity="true" data-reader-term="METR">METR(비영리 AI 평가기관)</strong>', 1)
+    $aeciPattern = [regex]::new('(?:앤트로픽의\s+)?(?:내부\s+역량\s+지수(?:인|인\s+)?\s*)?<strong>\s*AECI\s*</strong>|(?:앤트로픽의\s+)?(?:내부\s+역량\s+지수(?:인|인\s+)?\s*)?AECI', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $result = $aeciPattern.Replace($result, '앤트로픽의 <strong data-reader-term="AECI">AECI(내부 역량 지수)</strong>', 1)
+    return $result
+}
+
+function Assert-NaverReaderTerms([string]$Html, [object]$Formatting) {
+    $withoutEnding = [regex]::Replace($Html, '(?is)<div\b(?=[^>]*\bdata-blog-(?:sources|related)\s*=)[\s\S]*\z', '')
+    $plain = ConvertFrom-HtmlText $withoutEnding
+    $allow = @($Formatting.KnownAcronymAllowlist | ForEach-Object { [string]$_ })
+    $acronyms = @([regex]::Matches($plain, '(?<![A-Za-z0-9])(?<term>[A-Z][A-Z0-9-]{2,})(?![A-Za-z0-9])') | ForEach-Object { $_.Groups['term'].Value } | Select-Object -Unique)
+    foreach ($term in $acronyms) {
+        if ($allow -contains $term) { continue }
+        $pattern = '(?<![A-Za-z0-9])' + [regex]::Escape($term) + '\((?<explanation>[^)]*[가-힣][^)]*)\)'
+        $matches = @([regex]::Matches($plain, $pattern))
+        if ($matches.Count -ne 1) { throw "낯선 약어 $term 은 본문 첫 등장 한 곳에만 쉬운 한글 설명이 있어야 합니다." }
+        if ($plain.IndexOf($matches[0].Value, [StringComparison]::Ordinal) -ne $plain.IndexOf($term, [StringComparison]::Ordinal)) {
+            throw "낯선 약어 $term 의 쉬운 한글 설명이 첫 등장에 없습니다."
+        }
+    }
+    $declared = @([regex]::Matches($Html, '(?is)data-reader-term="(?<term>[^"]+)"[^>]*>(?<value>.*?)</(?:strong|span)>'))
+    foreach ($item in $declared) {
+        $term = $item.Groups['term'].Value
+        $value = ConvertFrom-HtmlText $item.Groups['value'].Value
+        if ($value -notmatch ('^' + [regex]::Escape($term) + '\([^)]*[가-힣][^)]*\)$')) { throw "독자 용어 $term 의 한글 설명 형식이 올바르지 않습니다." }
+        if (@([regex]::Matches($plain, [regex]::Escape($term) + '\(')).Count -ne 1) { throw "독자 용어 $term 의 설명은 첫 등장 한 번만 허용됩니다." }
+    }
+    if (@([regex]::Matches($Html, '(?is)data-primary-source-identity="true"')).Count -gt 1) { throw '핵심 근거기관의 첫 등장 굵은 표시는 한 번만 허용됩니다.' }
+}
+
+function Normalize-NaverImagePlacement([string]$Html) {
+    $wrapper = '(?is)<div\b(?=[^>]*\bdata-blog-image-wrap\s*=\s*["'']true["''])[^>]*>\s*<img\b[^>]*>\s*</div>'
+    $result = $Html
+    for ($pass = 0; $pass -lt 4; $pass++) {
+        $orphan = [regex]::Match($result, '(?is)(?<before>[\s\S]*?</p>)\s*(?<image>' + $wrapper + ')\s*(?<next><h[23]\b)')
+        if (-not $orphan.Success) { break }
+        $before = $orphan.Groups['before'].Value
+        $headings = @([regex]::Matches($before, '(?is)<h[23]\b[^>]*>[\s\S]*?</h[23]>'))
+        if ($headings.Count -eq 0) { break }
+        $heading = $headings[-1]
+        $prefix = $before.Substring(0, $heading.Index)
+        $suffix = $before.Substring($heading.Index + $heading.Length)
+        $result = $prefix + $heading.Value + $orphan.Groups['image'].Value + $suffix + $result.Substring($orphan.Groups['next'].Index)
+    }
+    return $result
 }
 
 function Assert-NaverSegment([string]$Fragment, [int]$Index) {
@@ -160,22 +210,40 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
         $heading = [regex]::Match($block, '(?is)^<div\s+data-naver-role="(?<role>section-heading|subheading)"[^>]*>\s*<p[^>]*>(?<text>.*?)</p>\s*</div>$')
         if ($heading.Success) {
             $role = $heading.Groups['role'].Value
-            $fontSize = if ($role -eq 'section-heading') { [int]$Formatting.SectionHeadingFontSizePx } else { [int]$Formatting.SubheadingFontSizePx }
+            $level = if ($role -eq 'section-heading') { 2 } else { 3 }
+            $fontSize = if ($level -eq 2) { [int]$Formatting.SectionHeadingFontSizePx } else { [int]$Formatting.SubheadingFontSizePx }
+            $topPx = if ($level -eq 2) { [int]$Formatting.SectionHeadingTopPx } else { [int]$Formatting.SubheadingTopPx }
+            $bottomPx = if ($level -eq 2) { [int]$Formatting.SectionHeadingBottomPx } else { [int]$Formatting.SubheadingBottomPx }
+            $underline = if ($level -eq 2) { [bool]$Formatting.SectionHeadingUnderline } else { [bool]$Formatting.SubheadingUnderline }
+            $parentAdjacent = $false
+            if ($level -eq 3 -and $Actions.Count -ge 2) {
+                $previousSpacer = $Actions[$Actions.Count - 1]
+                $previousHeading = $Actions[$Actions.Count - 2]
+                if ([string]$previousSpacer.type -eq 'InsertVerticalSpacer' -and [string]$previousSpacer.purpose -eq 'HeadingBottom' -and
+                    [string]$previousHeading.type -eq 'InsertStandaloneHeading' -and [int]$previousHeading.level -eq 2) {
+                    $previousSpacer.purpose = 'ParentHeadingToSubheading'
+                    $previousSpacer.heightPx = [int]$Formatting.ParentHeadingToSubheadingPx
+                    $previousSpacer.postcondition.measuredHeightPx = [int]$Formatting.ParentHeadingToSubheadingPx
+                    $parentAdjacent = $true
+                }
+            }
+            if (-not $parentAdjacent) {
+                $Actions.Add([pscustomobject]@{
+                    order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingTop'; headingLevel=$level
+                    heightPx=$topPx; naverFontSizePx=16; naverLineHeightPercent=200
+                    postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$topPx }
+                })
+            }
             $Actions.Add([pscustomobject]@{
-                order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingTop'
-                heightPx=[int]$Formatting.SectionHeadingTopPx; naverFontSizePx=16; naverLineHeightPercent=200
-                postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=[int]$Formatting.SectionHeadingTopPx }
-            })
-            $Actions.Add([pscustomobject]@{
-                order=$Order.Value++; type='InsertStandaloneHeading'; level=($(if ($role -eq 'section-heading') { 2 } else { 3 }))
+                order=$Order.Value++; type='InsertStandaloneHeading'; level=$level
                 text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
-                fontSizePx=$fontSize; bold=$true; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
+                fontSizePx=$fontSize; bold=$true; underline=$underline; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
                 postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
             })
             $Actions.Add([pscustomobject]@{
-                order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'
-                heightPx=[int]$Formatting.SectionHeadingBottomPx; naverFontSizePx=13; naverLineHeightPercent=160
-                postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=[int]$Formatting.SectionHeadingBottomPx; tolerancePx=0.5 }
+                order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'; headingLevel=$level
+                heightPx=$bottomPx; naverFontSizePx=13; naverLineHeightPercent=160
+                postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$bottomPx; tolerancePx=0.5 }
             })
             continue
         }
@@ -248,16 +316,25 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
             }
             $before = $Actions[$index - 1]
             $after = $Actions[$index + 1]
-            if ([string]$before.type -ne 'InsertVerticalSpacer' -or [string]$before.purpose -ne 'HeadingTop' -or
-                [int]$before.heightPx -ne [int]$Formatting.SectionHeadingTopPx) {
-                throw '독립 소제목 위 32px 간격 동작이 올바르지 않습니다.'
+            $level = [int]$action.level
+            $expectedTop = if ($level -eq 2) { [int]$Formatting.SectionHeadingTopPx } else { [int]$Formatting.SubheadingTopPx }
+            $expectedBottom = if ($level -eq 2) { [int]$Formatting.SectionHeadingBottomPx } else { [int]$Formatting.SubheadingBottomPx }
+            $validTop = ([string]$before.type -eq 'InsertVerticalSpacer' -and [string]$before.purpose -eq 'HeadingTop' -and [int]$before.heightPx -eq $expectedTop)
+            if ($level -eq 3 -and [string]$before.purpose -eq 'ParentHeadingToSubheading') {
+                $validTop = ([int]$before.heightPx -eq [int]$Formatting.ParentHeadingToSubheadingPx)
             }
-            if ([string]$after.type -ne 'InsertVerticalSpacer' -or [string]$after.purpose -ne 'HeadingBottom' -or
-                [int]$after.heightPx -ne [int]$Formatting.SectionHeadingBottomPx) {
-                throw '독립 소제목 아래 21px 간격 동작이 올바르지 않습니다.'
-            }
+            if (-not $validTop) { throw "독립 H$level 소제목 위 간격 동작이 올바르지 않습니다." }
+            $validBottom = ([string]$after.type -eq 'InsertVerticalSpacer' -and [string]$after.purpose -eq 'HeadingBottom' -and [int]$after.heightPx -eq $expectedBottom)
+            if ([string]$after.purpose -eq 'HeadingToImage') { $validBottom = ([int]$after.heightPx -eq [int]$Formatting.HeadingToImagePx) }
+            if ($level -eq 2 -and [string]$after.purpose -eq 'ParentHeadingToSubheading') { $validBottom = ([int]$after.heightPx -eq [int]$Formatting.ParentHeadingToSubheadingPx) }
+            if ([string]$after.type -eq 'InsertImageAnchor' -and [bool]$after.postcondition.requireDirectlyAfterHeadingWhenApplicable) { $validBottom = $true }
+            if (-not $validBottom) { throw "독립 H$level 소제목 아래 간격 동작이 올바르지 않습니다." }
             if ([string]::IsNullOrWhiteSpace([string]$action.text) -or
                 -not [bool]$action.bold -or
+                ($level -eq 2 -and -not [bool]$action.underline) -or
+                ($level -eq 3 -and [bool]$action.underline) -or
+                ($level -eq 2 -and [int]$action.fontSizePx -ne [int]$Formatting.SectionHeadingFontSizePx) -or
+                ($level -eq 3 -and [int]$action.fontSizePx -ne [int]$Formatting.SubheadingFontSizePx) -or
                 -not [bool]$action.resetInlineFormattingBefore -or
                 -not [bool]$action.postcondition.requireStandaloneParagraph -or
                 -not [bool]$action.postcondition.forbidMergedPreviousText -or
@@ -432,6 +509,9 @@ foreach ($name in $requiredFiles) {
 }
 
 $html = [IO.File]::ReadAllText((Join-Path $sourceFull 'Blogger에_붙여넣을_본문.html'), [Text.Encoding]::UTF8)
+$html = Apply-NaverReaderTermRules -Html $html
+$html = Normalize-NaverImagePlacement -Html $html
+Assert-NaverReaderTerms -Html $html -Formatting $config.EditorFormatting
 $metadata = [IO.File]::ReadAllText((Join-Path $sourceFull '메타데이터.txt'), [Text.Encoding]::UTF8)
 $imagePromptText = [IO.File]::ReadAllText((Join-Path $sourceFull '이미지_프롬프트.txt'), [Text.Encoding]::UTF8)
 $job = Get-Content -LiteralPath (Join-Path $sourceFull '작업정보.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -475,11 +555,19 @@ $blockSequence = 0
 $blockDirectory = Join-Path $outputRoot 'blocks'
 for ($index = 0; $index -lt 4; $index++) {
     Add-AtomicSegmentActions -Actions $actions -Order ([ref]$order) -Segment $segments[$index] -BlockDirectory $blockDirectory -Formatting $config.EditorFormatting -BlockSequence ([ref]$blockSequence)
+    if ($actions.Count -gt 0) {
+        $lastTextAction = $actions[$actions.Count - 1]
+        if ([string]$lastTextAction.type -eq 'InsertVerticalSpacer' -and [string]$lastTextAction.purpose -eq 'HeadingBottom') {
+            # 네이버는 제목과 이미지 구성요소 사이에 자체 간격을 만듭니다. 별도 빈 문단을
+            # 추가하면 목표값과 기본 간격이 합산되므로 제목 바로 아래 이미지는 빈 문단 없이 붙입니다.
+            $actions.RemoveAt($actions.Count - 1)
+        }
+    }
     $role = @($config.ImageAutomation.Roles | Sort-Object Order)[$index]
     $anchorId = ('NTE_IMAGE_{0:D2}' -f ($index + 1))
     $actions.Add([pscustomobject]@{
         order = $order++; type = 'InsertImageAnchor'; anchorId = $anchorId; text = ('[[' + $anchorId + ']]')
-        postcondition = [pscustomobject]@{ requireStandaloneParagraph = $true; requireUniqueExactText = $true; forbidVisibleAfterUpload = $true }
+        postcondition = [pscustomobject]@{ requireStandaloneParagraph = $true; requireUniqueExactText = $true; forbidVisibleAfterUpload = $true; requireDirectlyAfterHeadingWhenApplicable = $true; maximumRenderedHeadingGapPx = 24 }
     })
 }
 Add-AtomicSegmentActions -Actions $actions -Order ([ref]$order) -Segment $segments[4] -BlockDirectory $blockDirectory -Formatting $config.EditorFormatting -BlockSequence ([ref]$blockSequence)

@@ -61,8 +61,12 @@ try {
         Assert-True ($position -gt 0 -and $position -lt (@($plan.actions).Count - 1)) '소제목 앞뒤 동작 존재'
         $beforeAction = @($plan.actions)[$position - 1]
         $afterHeading = @($plan.actions)[$position + 1]
-        Assert-True ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq 32) '소제목 위 독립 32px 간격'
-        Assert-True ($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom' -and $afterHeading.heightPx -eq 21) '소제목 아래 독립 21px 간격'
+        $expectedTop = if ($headingAction.level -eq 2) { 32 } else { 24 }
+        $expectedBottom = if ($headingAction.level -eq 2) { 21 } else { 12 }
+        Assert-True ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq $expectedTop) "H$($headingAction.level) 위 독립 간격"
+        $validAfter = ($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom' -and $afterHeading.heightPx -eq $expectedBottom) -or ($afterHeading.type -eq 'InsertImageAnchor' -and [bool]$afterHeading.postcondition.requireDirectlyAfterHeadingWhenApplicable)
+        Assert-True $validAfter "H$($headingAction.level) 아래 간격 또는 직접 이미지 연결"
+        Assert-True (($headingAction.level -eq 2 -and $headingAction.fontSizePx -eq 19 -and [bool]$headingAction.underline) -or ($headingAction.level -eq 3 -and $headingAction.fontSizePx -eq 16 -and -not [bool]$headingAction.underline)) 'H2/H3 크기·밑줄 계층'
         Assert-True ([bool]$headingAction.postcondition.requireStandaloneParagraph) '소제목 독립 문단 사후조건'
         Assert-True ([bool]$headingAction.postcondition.forbidMergedPreviousText -and [bool]$headingAction.postcondition.forbidMergedNextText) '소제목 앞뒤 본문 합침 금지'
     }
@@ -91,7 +95,8 @@ try {
     $segmentText = (Get-ChildItem -LiteralPath (Join-Path $result.outputRoot 'segments') -Filter '*.html' | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
     Assert-True ($segmentText -notmatch '<h[23]\b') '네이버 소제목을 안정적인 블록으로 변환'
     Assert-True ($segmentText -match 'data-naver-role="section-heading"') '소제목 역할 표식'
-    Assert-True ($segmentText -match 'margin:32px 0 21px 0') '소제목 위·아래 여백 기준'
+    Assert-True ($segmentText -match 'margin:32px 0 21px 0') 'H2 위·아래 여백 기준'
+    Assert-True ($segmentText -match 'margin:24px 0 12px 0') 'H3 위·아래 여백 기준'
     Assert-True ($segmentText -match 'font-size:15px') '본문 15px 기준'
     Assert-True ($segmentText -match 'line-height:27px') '본문 27px 줄높이 기준'
     Assert-True ($segmentText -match 'line-height:24px') '바탕색 상자 24px 줄높이 기준'
@@ -100,12 +105,13 @@ try {
     Assert-True ($blockText -match 'text-align\s*:\s*justify' -and $blockText -match 'text-align-last\s*:\s*left') '본문 오른쪽 끝 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
     $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
-    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','앞 32px','뒤 21px','문단 뒤 18px','PasteRenderedSegment')) {
+    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지')) {
         Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
     }
     Assert-True ($promptText -match '(?i)text-align:\s*justify\s*;\s*text-align-last:\s*left') '프롬프트 본문 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     Assert-True ($promptText -notmatch '<h[23][^>]+margin:\s*(?:35px\s+0\s+15px|20px\s+0\s+10px)') '프롬프트 소제목의 과거 여백 기준 제거'
-    Assert-True (@([regex]::Matches($promptText, '<h[23][^>]+margin:\s*32px\s+0\s+21px')).Count -ge 7) '프롬프트 소제목 32px/21px 기준'
+    Assert-True (@([regex]::Matches($promptText, '<h2[^>]+font-size:\s*19px')).Count -ge 4) '프롬프트 H2 19px 기준'
+    Assert-True (@([regex]::Matches($promptText, '<h3[^>]+font-size:\s*16px')).Count -ge 3) '프롬프트 H3 16px 기준'
     $after = Get-ChildItem -LiteralPath $source -File | Sort-Object Name | Get-FileHash -Algorithm SHA256
     Assert-True (($before.Hash -join '|') -eq ($after.Hash -join '|')) 'Google 입력 자료 무변경'
     Write-Output 'Google 기반 네이버 패키지 테스트 통과'
