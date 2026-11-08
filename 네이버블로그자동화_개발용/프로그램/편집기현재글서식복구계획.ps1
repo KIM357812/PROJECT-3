@@ -122,11 +122,13 @@ foreach ($heading in $headings) {
         scrollMode='CenterVisibleOutsideFixedToolbar'; forbidAccessibilitySelectText=$true
         bold=$true; alignment='left'; topPx=32; bottomPx=21; requireStandaloneParagraph=$true
         postcondition=[pscustomobject]@{
-            paragraphStyle='소제목'; requireStandaloneParagraph=$true; requireRenderedDom=$true
+            paragraphStyle='소제목'; nativeComponentClass='se-sectionTitle'
+            requireNativeSectionTitleComponent=$true
+            requireStandaloneParagraph=$true; requireRenderedDom=$true
             requiredFontClass=('se-fs' + [int]$heading.fontSizePx); forbiddenFontClass='se-fs30'
             requiredFontFamilyClass='se-ff-system'; expectedBoldElementCount=1
             computedFontSizePx=[int]$heading.fontSizePx
-            measuredGapBeforePx=32; measuredGapAfterPx=21; gapTolerancePx=1
+            minimumGapDifferencePx=6; requireGapBeforeGreaterThanAfter=$true
             requireEveryTextRunFontSize=$true; rejectInheritedFontSize=$true
         }
     })

@@ -41,6 +41,8 @@ export function createEditorRunner(domTab, nativeTab) {
       text:p.textContent,
       runs:Array.from(p.querySelectorAll('span.__se-node')).map(s=>({text:s.textContent,size:+getComputedStyle(s).fontSize.replace('px',''),bold:!!s.querySelector('b,strong')})),
       lineHeight:getComputedStyle(p).lineHeight,
+      componentClass:p.closest('.se-component')?.className||'',
+      paragraphClass:p.className||'',
       html:p.outerHTML
     }));
   }
@@ -49,9 +51,15 @@ export function createEditorRunner(domTab, nativeTab) {
     if(url!=='https://blog.naver.com/ij1128?Redirect=Write&') throw Error('Not the authorized new-post editor');
     const p=await select(action.text);
     if(action.action==='ApplyHeadingByExactText') {
-      // Native subheading style forces 30px; use a body paragraph with explicit typography.
-      await button('문단 서식 변경'); await button('본문');
+      // Mobile Naver ignores the line-height of a body paragraph that merely
+      // looks like a heading.  Convert it to Naver's native section-title
+      // component first, then explicitly restore the approved 19/16px size.
+      // Once isolated as a section-title component, Ctrl+A is scoped to that
+      // component and reliably selects every text run (including wrapped text).
+      await button('문단 서식 변경'); await button('소제목');
       await select(action.text);
+      await nativeTab.pressKey(null,'ctrl+a');
+      await nativeTab.getAXState({emit:false});
       await size(action.fontSizePx===17?16:action.fontSizePx);
       if(await frame.getByRole('button',{name:'굵기 적용',exact:true}).count()) await button('굵기 적용');
     } else if(action.action==='ApplyMixedCalloutParagraphByExactText') {
@@ -79,6 +87,9 @@ export function createEditorRunner(domTab, nativeTab) {
     const observed=await inspect(action.text);
     const expected=action.fontSizePx===17?16:action.fontSizePx;
     if(!observed.runs.length || observed.runs.some(r=>r.size!==expected)) throw Error('Rendered font size mismatch: '+JSON.stringify(observed));
+    if(action.action==='ApplyHeadingByExactText' && !/\bse-sectionTitle\b/.test(observed.componentClass)) {
+      throw Error('Heading is not a native Naver section-title component: '+JSON.stringify(observed));
+    }
     if(action.action==='ApplyMixedCalloutParagraphByExactText') {
       const bold=clean(observed.runs.filter(r=>r.bold).map(r=>r.text).join(''));
       if(bold!==clean(action.boldLabels.join(''))) throw Error('Inline bold mismatch: '+bold);
@@ -87,14 +98,30 @@ export function createEditorRunner(domTab, nativeTab) {
   }
   async function space(action) {
     const p=await paragraph(action.text);
-    const adjacent=await p.evaluate(p=>({beforeId:p.previousElementSibling?.id,before:p.previousElementSibling?.textContent,after:p.nextElementSibling?.textContent,
-      beforeHeight:p.previousElementSibling?.getBoundingClientRect().height,afterHeight:p.nextElementSibling?.getBoundingClientRect().height}));
-    if(adjacent.before!==undefined && !clean(adjacent.before) && adjacent.after!==undefined && !clean(adjacent.after) && adjacent.beforeHeight===32 && adjacent.afterHeight===21) return adjacent;
-    // Naver normalizes pasted HTML line-height and may merge the heading with
-    // neighbouring text.  Never rebuild a heading plus spacers as one fragment.
-    // The new-post constructor must create both native spacer paragraphs before
-    // typography repair begins; a mismatch is a hard failure, not a repair hint.
-    throw Error('Native standalone heading spacers are missing or not exactly 32px/21px: '+JSON.stringify(adjacent));
+    const adjacent=await p.evaluate(p=>{
+      const component=p.closest('.se-component');
+      const previous=component?.previousElementSibling;
+      const next=component?.nextElementSibling;
+      const r=component?.getBoundingClientRect();
+      const pr=previous?.getBoundingClientRect();
+      const nr=next?.getBoundingClientRect();
+      return {
+        componentClass:component?.className||'',
+        before:pr&&r?r.top-pr.bottom:null,
+        after:nr&&r?nr.top-r.bottom:null,
+        previousClass:previous?.className||'',
+        nextClass:next?.className||''
+      };
+    });
+    if(!/\bse-sectionTitle\b/.test(adjacent.componentClass)) throw Error('Native section-title component missing');
+    if(adjacent.before===null || adjacent.after===null || adjacent.before<0 || adjacent.after<0) {
+      throw Error('Native section-title spacing could not be measured: '+JSON.stringify(adjacent));
+    }
+    // Naver applies different absolute values in PC and mobile preview.  The
+    // stable semantic invariant is the one the user requested: the heading is
+    // visually attached to the following content, not the preceding paragraph.
+    if(adjacent.before-adjacent.after<6) throw Error('Heading hierarchy is unclear: '+JSON.stringify(adjacent));
+    return adjacent;
   }
   async function audit(plan) {
     const headings=plan.actions.filter(a=>a.action==='ApplyHeadingByExactText');
@@ -103,13 +130,17 @@ export function createEditorRunner(domTab, nativeTab) {
     const records=[];
     for(const a of [...headings,...facts]) {
       const observed=await inspect(a.text);
-      const gaps=await (await paragraph(a.text)).evaluate(p=>({before:p.previousElementSibling?.getBoundingClientRect().height,
-        after:p.nextElementSibling?.getBoundingClientRect().height,nextText:p.nextElementSibling?.nextElementSibling?.textContent}));
+      const gaps=a.action==='ApplyHeadingByExactText'?await space(a):await (await paragraph(a.text)).evaluate(p=>({
+        before:p.previousElementSibling?.getBoundingClientRect().height,
+        after:p.nextElementSibling?.getBoundingClientRect().height,
+        nextText:p.nextElementSibling?.nextElementSibling?.textContent
+      }));
       const px=a.fontSizePx===17?16:a.fontSizePx;
-      const expectedAfter=headings.some(h=>clean(h.text)===clean(gaps.nextText||''))?32:21;
       const bold=clean(observed.runs.filter(r=>r.bold).map(r=>r.text).join(''));
       const valid=observed.runs.length>0 && observed.runs.every(r=>r.size===px) &&
-        (a.action==='ApplyHeadingByExactText' ? observed.runs.every(r=>r.bold)&&gaps.before===32&&gaps.after===expectedAfter : bold===clean(a.boldLabels.join('')));
+        (a.action==='ApplyHeadingByExactText'
+          ? observed.runs.every(r=>r.bold)&&/\bse-sectionTitle\b/.test(observed.componentClass)&&gaps.before-gaps.after>=6
+          : bold===clean(a.boldLabels.join('')));
       records.push({text:a.text,valid,observed,gaps});
     }
     for(const a of plan.actions.filter(a=>a.action==='ApplyBodyParagraphByExactText')) {
