@@ -63,6 +63,7 @@ function Get-Tags([string]$Metadata) {
 
 function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     $result = [regex]::Replace($Fragment, '(?is)<style\b[^>]*>.*?</style>', '')
+    $result = [regex]::Replace($result, '(?is)<div(?<attrs>[^>]*)>(?<lead>\s*<p[^>]*>\s*이 글에서 다루는 내용\s*</p>)', '<div data-naver-role="overview-box"${attrs}>${lead}')
     $result = [regex]::Replace($result, '(?i)font-size\s*:\s*16px', ('font-size:{0}px' -f [int]$Formatting.BodyFontSizePx))
     $result = [regex]::Replace($result, '(?is)<h2\b[^>]*>(?<text>.*?)</h2>', {
         param($match)
@@ -110,10 +111,10 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     })
     $result = [regex]::Replace($result, '(?is)(?<sources><div\b(?=[^>]*\bdata-blog-sources="true")[^>]*>\s*<p\b[^>]*>[\s\S]*?</p>\s*</div>)\s*(?<related><div\b(?=[^>]*\bdata-blog-related="true")[^>]*>[\s\S]*?</div>)', {
         param($match)
-        $sources = [regex]::Replace($match.Groups['sources'].Value, '(?i)margin\s*:\s*[^;]+;', 'margin:0;', 1)
-        $related = [regex]::Replace($match.Groups['related'].Value, '(?i)margin\s*:\s*[^;]+;', 'margin:0;', 1)
+        $sources = [regex]::Replace($match.Groups['sources'].Value, '(?is)(<div\b(?=[^>]*\bdata-blog-sources="true")[^>]*?)style\s*=\s*"[^"]*"', '$1style="margin:0;padding:0;border:0;background:transparent;width:100%;box-sizing:border-box;"')
+        $related = [regex]::Replace($match.Groups['related'].Value, '(?is)(<div\b(?=[^>]*\bdata-blog-related="true")[^>]*?)style\s*=\s*"[^"]*"', '$1style="margin:0;padding:0;border:0;background:transparent;width:100%;box-sizing:border-box;"')
         $related = [regex]::Replace($related, '(?is)(<div\b[^>]*\bdata-blog-related="true"[^>]*>)', ('$1<span data-nte-reference-gap="true" style="display:block;height:{0}px;line-height:{0}px;font-size:1px;color:transparent;">&nbsp;</span>' -f [int]$Formatting.ReferenceToRelatedPx), 1)
-        '<table data-naver-role="reference-group" style="width:100%;margin:{0}px 0 0 0;border-collapse:collapse;border:1px solid #D9DDE3;background:#fff;box-sizing:border-box;"><tbody><tr><td style="padding:12px 14px;border:0;background:#fff;">{1}{2}</td></tr></tbody></table>' -f [int]$Formatting.ReferenceTopPx, $sources, $related
+        '<table data-naver-role="reference-group" border="1" bordercolor="#CDD2D9" style="width:100%;margin:{0}px 0 0 0;border-collapse:collapse;border:1px solid #CDD2D9;background:#fff;box-sizing:border-box;"><tbody><tr><td style="padding:12px 14px;border:1px solid #CDD2D9;background:#fff;">{1}{2}</td></tr></tbody></table>' -f [int]$Formatting.ReferenceTopPx, $sources, $related
     })
     return $result.Trim()
 }
@@ -258,7 +259,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $tableAdjacent = $false
             if ($level -eq 2 -and $Actions.Count -ge 1) {
                 $previousBlock = $Actions[$Actions.Count - 1]
-                if ([string]$previousBlock.type -eq 'PasteRenderedAtomicBlock' -and [string]$previousBlock.blockRole -eq 'DataTable') {
+                if ([string]$previousBlock.type -eq 'PasteRenderedAtomicBlock' -and [string]$previousBlock.blockRole -in @('DataTable','OverviewBox')) {
                     $previousBlock.postcondition | Add-Member -NotePropertyName requireDirectlyBeforeHeadingWhenApplicable -NotePropertyValue $true -Force
                     $previousBlock.postcondition | Add-Member -NotePropertyName maximumRenderedHeadingGapPx -NotePropertyValue ([int]$Formatting.TableToHeadingPx) -Force
                     $tableAdjacent = $true
@@ -286,7 +287,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
         }
         $type = if ($block -match '(?is)^<p\b') { 'PasteStandaloneParagraphBlock' } else { 'PasteRenderedAtomicBlock' }
         $isCallout = ($block -match '(?is)(?:data-blog-six-facts|background(?:-color)?\s*:)')
-        $blockRole = if ($block -match '(?is)\bsolidb-responsive-table\b') { 'DataTable' } elseif ($block -match '(?is)data-naver-role="reference-group"') { 'ReferenceGroup' } else { '' }
+        $blockRole = if ($block -match '(?is)\bsolidb-responsive-table\b') { 'DataTable' } elseif ($block -match '(?is)data-naver-role="overview-box"') { 'OverviewBox' } elseif ($block -match '(?is)data-naver-role="reference-group"') { 'ReferenceGroup' } else { '' }
         if ($type -eq 'PasteStandaloneParagraphBlock') {
             $block = [regex]::Replace($block, '(?i)text-align\s*:\s*(?:left|justify)(?:\s*;\s*text-align-last\s*:\s*left)?', 'text-align:justify;text-align-last:left')
         }
@@ -358,7 +359,7 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
             $expectedTop = if ($level -eq 2) { [int]$Formatting.SectionHeadingTopPx } else { [int]$Formatting.SubheadingTopPx }
             $expectedBottom = if ($level -eq 2) { [int]$Formatting.SectionHeadingBottomPx } else { [int]$Formatting.SubheadingBottomPx }
             $validTop = ([string]$before.type -eq 'InsertVerticalSpacer' -and [string]$before.purpose -eq 'HeadingTop' -and [int]$before.heightPx -eq $expectedTop)
-            if ($level -eq 2 -and [string]$before.type -eq 'PasteRenderedAtomicBlock' -and [string]$before.blockRole -eq 'DataTable') {
+            if ($level -eq 2 -and [string]$before.type -eq 'PasteRenderedAtomicBlock' -and [string]$before.blockRole -in @('DataTable','OverviewBox')) {
                 $validTop = ([bool]$before.postcondition.requireDirectlyBeforeHeadingWhenApplicable -and [int]$before.postcondition.maximumRenderedHeadingGapPx -eq [int]$Formatting.TableToHeadingPx)
             }
             if ($level -eq 3 -and [string]$before.purpose -eq 'ParentHeadingToSubheading') {

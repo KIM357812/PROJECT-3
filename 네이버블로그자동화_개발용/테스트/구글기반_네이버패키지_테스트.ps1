@@ -14,8 +14,9 @@ try {
     New-Item -ItemType Directory -Path $source,$work -Force | Out-Null
     $image = '<div data-blog-image-wrap="true" style="text-align:center;margin:28px 0 28px 0"><img src="data:image/svg+xml;base64,PHN2Zy8+" alt="장면" title="장면"></div>'
     $table = '<div class="solidb-responsive-table" style="margin:25px 0"><table><thead><tr><th>항목</th><th>값</th></tr></thead><tbody><tr><td data-label="항목">시험</td><td data-label="값">1</td></tr></tbody></table></div>'
+    $overview = '<div style="background-color:#eef3fb;border:1px solid #d3e0f5;padding:14px 18px;margin:20px 0"><p style="font-weight:700">이 글에서 다루는 내용</p><p>핵심 내용 안내</p></div>'
     $related = '<div data-blog-related="true" style="margin:14px 0 0 0"><p>관련 글</p><p><a href="https://blog.naver.com/ij1128/1">이전 글</a></p></div>'
-    $html = '<div style="width:100%;max-width:800px;margin:0 auto"><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 첫 문단</p><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 둘째 문단</p>' + $image + $table + '<h2 style="font-size:22px;border-bottom:2px solid #000">현황</h2><div style="background:#eee"><p style="line-height:1.6;margin:0 0 8px 0;font-weight:700">강조 제목</p><p style="line-height:1.6">강조 본문</p></div>' + $image + '<h3>분석</h3>' + $image + '<p>전망</p>' + $image + '<div data-blog-sources="true" style="margin:20px 0"><p><strong>출처 :</strong> 링크</p></div>' + $related + '</div>'
+    $html = '<div style="width:100%;max-width:800px;margin:0 auto"><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 첫 문단</p><p style="font-size:16px;line-height:1.75;margin:0 0 18px 0;text-align:justify;text-align-last:left">도입 둘째 문단</p>' + $image + $table + '<h2 style="font-size:22px;border-bottom:2px solid #000">현황</h2>' + $overview + '<h2>측정</h2><div style="background:#eee"><p style="line-height:1.6;margin:0 0 8px 0;font-weight:700">강조 제목</p><p style="line-height:1.6">강조 본문</p></div>' + $image + '<h3>분석</h3>' + $image + '<p>전망</p>' + $image + '<div data-blog-sources="true" style="margin:20px 0"><p><strong>출처 :</strong> 링크</p></div>' + $related + '</div>'
     Set-Content -LiteralPath (Join-Path $source 'Blogger에_붙여넣을_본문.html') -Value $html -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '메타데이터.txt') -Value "## 5. 해시태그`nAI, 데이터센터, 전력망, 에너지, 기술동향`n## 6. 내부 사실검증표" -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '사실검증표.md') -Value '검증 완료' -Encoding UTF8
@@ -56,7 +57,7 @@ try {
     Assert-True (@($plan.reusedExistingNaverFeatures).Count -eq 3) '기존 네이버 이미지 기능만 재사용'
     Assert-True (@($plan.actions | Where-Object type -eq 'PasteRenderedSegment').Count -eq 0) '여러 제목·본문을 한 번에 붙여 넣는 구간 동작 금지'
     $headingActions = @($plan.actions | Where-Object type -eq 'InsertStandaloneHeading')
-    Assert-True ($headingActions.Count -eq 2) 'H2·H3 독립 소제목 동작 수'
+    Assert-True ($headingActions.Count -eq 3) 'H2·H3 독립 소제목 동작 수'
     Assert-True ($plan.headingInsertionMode -eq 'StandaloneParagraphWithMeasuredSpacers') '독립 소제목 삽입 모드'
     foreach ($headingAction in $headingActions) {
         $position = [array]::IndexOf(@($plan.actions), $headingAction)
@@ -65,7 +66,7 @@ try {
         $afterHeading = @($plan.actions)[$position + 1]
         $expectedTop = if ($headingAction.level -eq 2) { 32 } else { 24 }
         $expectedBottom = if ($headingAction.level -eq 2) { 21 } else { 12 }
-        $validBefore = ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq $expectedTop) -or ($headingAction.level -eq 2 -and $beforeAction.blockRole -eq 'DataTable' -and $beforeAction.postcondition.maximumRenderedHeadingGapPx -eq 30)
+        $validBefore = ($beforeAction.type -eq 'InsertVerticalSpacer' -and $beforeAction.purpose -eq 'HeadingTop' -and $beforeAction.heightPx -eq $expectedTop) -or ($headingAction.level -eq 2 -and $beforeAction.blockRole -in @('DataTable','OverviewBox') -and $beforeAction.postcondition.maximumRenderedHeadingGapPx -eq 30)
         Assert-True $validBefore "H$($headingAction.level) 위 독립 간격"
         $validAfter = ($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom' -and $afterHeading.heightPx -eq $expectedBottom) -or ($afterHeading.type -eq 'InsertImageAnchor' -and [bool]$afterHeading.postcondition.requireDirectlyAfterHeadingWhenApplicable)
         Assert-True $validAfter "H$($headingAction.level) 아래 간격 또는 직접 이미지 연결"
@@ -105,14 +106,18 @@ try {
     Assert-True ($segmentText -match 'line-height:24px') '바탕색 상자 24px 줄높이 기준'
     Assert-True ($segmentText -match 'margin:32px 0 0 0') '참고자료 위 32px 기준'
     Assert-True ($segmentText -match 'color:#4A78E0' -and $segmentText -notmatch 'text-decoration|border-bottom') 'H2 밝은 블루·밑줄 없음 기준'
-    Assert-True ($segmentText -match '<table data-naver-role="reference-group"' -and $segmentText -match 'border:1px solid #D9DDE3' -and $segmentText -match 'data-nte-reference-gap="true" style="display:block;height:6px;' -and $segmentText -notmatch 'aria-hidden="true"') '참고자료·관련 글 단일 무배경 테두리 상자와 6px 내부 간격'
+    Assert-True ($segmentText -match '<table data-naver-role="reference-group" border="1" bordercolor="#CDD2D9"' -and ([regex]::Matches($segmentText, 'border:1px solid #CDD2D9')).Count -ge 2 -and $segmentText -match 'data-nte-reference-gap="true" style="display:block;height:6px;' -and $segmentText -notmatch 'aria-hidden="true"') '참고자료·관련 글 항상 표시되는 단일 무배경 회색 테두리 상자와 6px 내부 간격'
+    $referenceGroupText = [regex]::Match($segmentText, '(?is)<table\s+data-naver-role="reference-group"[\s\S]*?</table>').Value
+    Assert-True (([regex]::Matches($referenceGroupText, 'background:transparent;width:100%;box-sizing:border-box;')).Count -ge 2 -and $referenceGroupText -notmatch 'background-color:\s*#eef3fb|background-color:\s*#f8f9fa') '참고자료·관련 글 내부 색상 배경 제거'
     $tableActions = @($plan.actions | Where-Object blockRole -eq 'DataTable')
     Assert-True ($tableActions.Count -eq 1 -and [bool]$tableActions[0].postcondition.requireDirectlyBeforeHeadingWhenApplicable -and $tableActions[0].postcondition.maximumRenderedHeadingGapPx -eq 30) '표 다음 H2 실제 간격 30px 이하 실행 조건'
+    $overviewActions = @($plan.actions | Where-Object blockRole -eq 'OverviewBox')
+    Assert-True ($overviewActions.Count -eq 1 -and [bool]$overviewActions[0].postcondition.requireDirectlyBeforeHeadingWhenApplicable -and $overviewActions[0].postcondition.maximumRenderedHeadingGapPx -eq 30) '이 글에서 다루는 내용 상자 다음 H2 실제 간격 30px 이하 실행 조건'
     Assert-True ($segmentText -match '참고자료 :') '참고자료 표기 기준'
     Assert-True ($blockText -match 'text-align\s*:\s*justify' -and $blockText -match 'text-align-last\s*:\s*left') '본문 오른쪽 끝 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
     $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
-    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 없음','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 외곽선')) {
+    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 없음','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 외곽선','첫 번째 이미지에만 네이버 `대표` 지정')) {
         Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
     }
     Assert-True ($promptText -match '(?i)text-align:\s*justify\s*;\s*text-align-last:\s*left') '프롬프트 본문 양쪽 정렬과 마지막 줄 왼쪽 정렬'
