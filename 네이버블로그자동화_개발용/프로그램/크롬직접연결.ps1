@@ -3,6 +3,7 @@
 param(
     [string]$PackagePath,
     [Parameter(Mandatory=$true)][string]$RunDirectory,
+    [string]$TargetId,
     [switch]$ConnectionTestOnly,
     [switch]$AllowTagOnlyPublicationSettings
 )
@@ -32,6 +33,8 @@ $config=Get-Content -LiteralPath $configPath -Raw -Encoding UTF8|ConvertFrom-Jso
 $browser=$config.BrowserAutomation
 if($null -eq $browser -or [string]$browser.Mode -ne 'ChromeDevTools'){throw 'BROWSER_AUTOMATION_CONFIGURATION_MISSING'}
 $port=[int]$browser.DebugPort
+$retryCount=if($null -ne $browser.RecoveryRetryCount){[math]::Max(1,[int]$browser.RecoveryRetryCount)}else{3}
+$retryDelayMs=if($null -ne $browser.RecoveryRetryDelayMs){[math]::Max(100,[int]$browser.RecoveryRetryDelayMs)}else{750}
 $profileRoot=[Environment]::ExpandEnvironmentVariables([string]$browser.ProfileRoot)
 if([string]::IsNullOrWhiteSpace($profileRoot)){throw 'CHROME_PROFILE_ROOT_MISSING'}
 $profileRoot=[IO.Path]::GetFullPath($profileRoot)
@@ -64,8 +67,23 @@ $node=(Get-Command node -ErrorAction Stop).Source
 $runner=Join-Path $PSScriptRoot '크롬직접실행.mjs'
 $resultPath=Join-Path $RunDirectory $(if($ConnectionTestOnly){'browser-preflight.json'}else{'result.json'})
 $args=@($runner,'--mode',$(if($ConnectionTestOnly){'preflight'}else{'execute'}),'--port',[string]$port,'--package',$(if($PackagePath){$PackagePath}else{'-'}),'--run-dir',$RunDirectory,'--result',$resultPath,'--blog-id',[string]$config.Naver.BlogId,'--blog-url',[string]$config.Naver.BlogUrl,'--write-url',[string]$config.Naver.WriteUrl)
+if(-not[string]::IsNullOrWhiteSpace($TargetId)){$args+=@('--target-id',$TargetId)}
 if($AllowTagOnlyPublicationSettings){$args+=@('--allow-tag-only-publication-settings','true')}
-& $node @args
-if($LASTEXITCODE -ne 0){throw "CHROME_DIRECT_RUNNER_FAILED: 종료 코드 $LASTEXITCODE"}
+$attemptLog=@()
+for($attempt=1;$attempt -le $retryCount;$attempt++){
+    if(Test-Path -LiteralPath $resultPath -PathType Leaf){Remove-Item -LiteralPath $resultPath -Force}
+    & $node @args
+    $exitCode=$LASTEXITCODE
+    $reason=''
+    if(Test-Path -LiteralPath $resultPath -PathType Leaf){
+        try{$reason=[string]((Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8|ConvertFrom-Json).reason)}catch{}
+    }
+    $attemptLog += [pscustomobject]@{attempt=$attempt;exitCode=$exitCode;reason=$reason;at=(Get-Date).ToString('o')}
+    if($exitCode -eq 0){break}
+    if($reason -match 'NAVER_LOGIN_REQUIRED|UNSAFE_EDITOR_URL|IMAGE_FILE_MISSING|PACKAGE_PATH_REQUIRED'){break}
+    if($attempt -lt $retryCount){Start-Sleep -Milliseconds $retryDelayMs}
+}
+$attemptLog|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $RunDirectory 'browser-recovery-attempts.json') -Encoding UTF8
+if($exitCode -ne 0){throw "CHROME_DIRECT_RUNNER_FAILED: $retryCount 회 이내 복구 실패 (종료 코드 $exitCode, $reason)"}
 if(-not(Test-Path -LiteralPath $resultPath -PathType Leaf)){throw 'CHROME_DIRECT_RESULT_MISSING'}
 Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8

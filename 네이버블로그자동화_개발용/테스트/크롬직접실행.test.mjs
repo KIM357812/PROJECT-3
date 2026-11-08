@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths} from '../프로그램/크롬직접실행.mjs';
+import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths,chooseEditorTargetAction} from '../프로그램/크롬직접실행.mjs';
 
 test('argument parser keeps Korean and spaced paths as values',()=>{
   assert.deepEqual(parseArgs(['--mode','execute','--package','C:\\한글 폴더\\실행패키지.json']),{mode:'execute',package:'C:\\한글 폴더\\실행패키지.json'});
@@ -56,4 +56,14 @@ test('image actions must use only manifest optimized files in document order',()
 test('tag-only execution requires an explicit opt-in argument',()=>{
   const args=parseArgs(['--mode','execute','--allow-tag-only-publication-settings','true']);
   assert.equal(args['allow-tag-only-publication-settings'],'true');
+});
+test('preflight target id stays pinned and duplicate editor tabs are isolated',()=>{
+  const candidates=[{targetId:'old-a'},{targetId:'preflight-target'},{targetId:'old-b'}];
+  const pinned=chooseEditorTargetAction(candidates,['old-a','old-b'],'preflight-target');
+  assert.equal(pinned.kind,'reuse');
+  assert.equal(pinned.target.targetId,'preflight-target');
+  assert.equal(pinned.preferred,true);
+  const ambiguous=chooseEditorTargetAction(candidates,['old-a','old-b'],'missing');
+  assert.equal(ambiguous.kind,'create');
+  assert.equal(ambiguous.isolatedFromDuplicates,true);
 });

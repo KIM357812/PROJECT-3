@@ -5,7 +5,7 @@ $root=Join-Path $env:TEMP ('naver-run-test-'+[guid]::NewGuid())
 $null=New-Item -ItemType Directory -Path $root
 try {
     $runnerText = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../프로그램/통합실행.ps1') -Raw -Encoding UTF8
-    foreach($requiredInstruction in @('크롬직접연결.ps1','ChatGPT 중계 없이 전용 Chrome 연결','ConnectionTestOnly')){
+    foreach($requiredInstruction in @('크롬직접연결.ps1','ChatGPT 중계 없이 전용 Chrome 연결','ConnectionTestOnly','-TargetId ([string]$preflight.tabId)')){
         if(-not$runnerText.Contains($requiredInstruction)){throw "통합 실행 직접 연결 누락: $requiredInstruction"}
     }
     $directRunnerText = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../프로그램/크롬직접실행.mjs') -Raw -Encoding UTF8
@@ -21,26 +21,35 @@ try {
     foreach($forbidden in @('Send-NaverDesktopTask','Wait-NaverDesktopTask','desktop task: read the local request')){
         if($runnerText.Contains($forbidden)){throw "통합 실행에 채팅 중계가 남았습니다: $forbidden"}
     }
-    $ready=[pscustomobject]@{runId='test';status='Ready';errorCode='';reason='';extensionConnected=$true;naverTabReadVerified=$true;browserId='3';tabId='123';url='https://blog.naver.com/ij1128'}
-    Assert-NaverBrowserPreflight $ready 'test'
-    $direct=[pscustomobject]@{runId='test';status='Ready';errorCode='';reason='';extensionConnected=$false;directChromeConnected=$true;ownerLoginVerified=$true;naverTabReadVerified=$true;browserId='cdp:9225';tabId='target';url='https://blog.naver.com/ij1128'}
+    $direct=[pscustomobject]@{runId='test';status='Ready';errorCode='';reason='';extensionConnected=$false;directChromeConnected=$true;connectionPath='DedicatedChromeDevTools';ownerLoginVerified=$true;naverTabReadVerified=$true;browserId='cdp:9225';tabId='target';url='https://blog.naver.com/ij1128?Redirect=Write&'}
     Assert-NaverBrowserPreflight $direct 'test'
     foreach($case in @(
         @{field='errorCode';value='LOCAL_BROWSER_DISABLED'},
         @{field='runId';value='old-run'},
         @{field='status';value='Failed'},
-        @{field='extensionConnected';value=$false},
+        @{field='directChromeConnected';value=$false},
+        @{field='connectionPath';value='GenericComputerUse'},
+        @{field='ownerLoginVerified';value=$false},
         @{field='naverTabReadVerified';value='true'},
         @{field='tabId';value=''},
         @{field='url';value='https://blog.naver.com.evil.test/ij1128'},
         @{field='url';value='https://nid.naver.com/'}
     )) {
-        $candidate=$ready|ConvertTo-Json|ConvertFrom-Json
+        $candidate=$direct|ConvertTo-Json|ConvertFrom-Json
         $candidate.($case.field)=$case.value
         $rejected=$false
         try{Assert-NaverBrowserPreflight $candidate 'test'}catch{$rejected=$true}
         if(-not $rejected){throw "사전검사 오류 허용: $($case.field)"}
     }
+    $extensionOnly=$direct|ConvertTo-Json|ConvertFrom-Json
+    $extensionOnly.directChromeConnected=$false
+    $extensionOnly.extensionConnected=$true
+    $rejected=$false;try{Assert-NaverBrowserPreflight $extensionOnly 'test'}catch{$rejected=$true}
+    if(-not $rejected){throw '일반 확장 연결이 전용 Chrome 직접 연결을 대신했습니다.'}
+    $posted=$direct|ConvertTo-Json|ConvertFrom-Json
+    $posted.url='https://blog.naver.com/ij1128/224469188866'
+    $rejected=$false;try{Assert-NaverBrowserPreflight $posted 'test'}catch{$rejected=$true}
+    if(-not $rejected){throw '기존 게시물 URL을 새 글 편집기로 허용했습니다.'}
     $planPath=Join-Path $root 'editor-plan.json'
     @{actions=@(
         @{order=1;type='UploadImage';path=(Join-Path $root '01.jpg')},

@@ -133,6 +133,11 @@
     "DebugPort": 9225,
     "ProfileRoot": "%LOCALAPPDATA%\\SOLIDB\\NaverBlogAutomation\\ChromeProfile",
     "RequireDedicatedProfile": true,
+    "RecoveryRetryCount": 3,
+    "RecoveryRetryDelayMs": 750,
+    "IsolateDuplicateEditorTabs": true,
+    "PinPreflightTargetThroughExecution": true,
+    "MatchNativeInputWindowByCdpBounds": true,
     "UseChatQueue": false
   }
 }

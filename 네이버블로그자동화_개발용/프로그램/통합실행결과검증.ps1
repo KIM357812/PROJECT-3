@@ -6,13 +6,14 @@ function Assert-NaverBrowserPreflight($Result, [string]$RunId) {
     }
     if ($Result.status -ne 'Ready') { throw "BROWSER_PREFLIGHT_FAILED: $($Result.errorCode) $($Result.reason)" }
     if($Result.naverTabReadVerified -isnot [bool] -or $Result.naverTabReadVerified -ne $true){throw '브라우저 사전검사 증거 누락: naverTabReadVerified'}
-    $extensionOk=($Result.extensionConnected -is [bool] -and $Result.extensionConnected)
     $directOk=($Result.directChromeConnected -is [bool] -and $Result.directChromeConnected)
-    if(-not($extensionOk -or $directOk)){throw '브라우저 연결 방식 증거 누락'}
-    if($directOk -and ($Result.ownerLoginVerified -isnot [bool] -or -not $Result.ownerLoginVerified)){throw '자동화 전용 Chrome의 네이버 로그인 확인 실패'}
+    if(-not $directOk -or [string]$Result.connectionPath -ne 'DedicatedChromeDevTools'){throw '자동화 전용 Chrome 직접 연결 증거 누락'}
+    if($Result.ownerLoginVerified -isnot [bool] -or -not $Result.ownerLoginVerified){throw '자동화 전용 Chrome의 네이버 로그인 확인 실패'}
     if ([string]::IsNullOrWhiteSpace([string]$Result.browserId) -or [string]::IsNullOrWhiteSpace([string]$Result.tabId)) { throw '실제 브라우저/탭 식별자 누락' }
     $uri = $null
     if (-not [uri]::TryCreate([string]$Result.url,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https' -or $uri.Host -ne 'blog.naver.com') { throw '네이버 블로그 탭 확인 실패' }
+    if($uri.Query -match '(^|[?&])(logNo|postNo)=' -or $uri.AbsoluteUri -notmatch '(Redirect=Write|PostWriteForm)'){throw '새 글 편집기 URL 확인 실패'}
+    if($uri.AbsolutePath -ne '/ij1128' -and $uri.Query -notmatch '(^|[?&])blogId=ij1128(&|$)'){throw '대상 네이버 블로그 ID 확인 실패'}
 }
 function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$EditorPlanPath, [bool]$AllowTagOnlyPublicationSettings=$false) {
     if ($Result.runId -ne $RunId) { throw '다른 실행의 검증 결과입니다.' }

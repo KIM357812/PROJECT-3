@@ -32,7 +32,7 @@ try{
         return
     }
     Set-RunStatus 'Executing' '전용 Chrome에서 새 네이버 편집기를 열고 계획을 입력합니다.'
-    $out=& (Join-Path $PSScriptRoot '크롬직접연결.ps1') -PackagePath $PackagePath -RunDirectory $root -AllowTagOnlyPublicationSettings:$AllowTagOnlyPublicationSettings|ConvertFrom-Json
+    $out=& (Join-Path $PSScriptRoot '크롬직접연결.ps1') -PackagePath $PackagePath -RunDirectory $root -TargetId ([string]$preflight.tabId) -AllowTagOnlyPublicationSettings:$AllowTagOnlyPublicationSettings|ConvertFrom-Json
     $out|Add-Member -NotePropertyName runId -NotePropertyValue $runId -Force
     if($out.status -eq 'Blocked'){
         Set-RunStatus 'Blocked' ([string]$out.reason)

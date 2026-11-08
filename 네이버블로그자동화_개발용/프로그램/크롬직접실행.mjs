@@ -58,6 +58,14 @@ export function validatePlannedImagePaths(plan,manifest){
   if(new Set(actual).size!==actual.length) throw new Error('IMAGE_PLAN_DUPLICATE_PATH');
   return true;
 }
+export function chooseEditorTargetAction(candidates,markedTargetIds=[],preferredTargetId=''){
+  const preferred=candidates.find(t=>t.targetId===preferredTargetId);
+  if(preferred)return {kind:'reuse',target:preferred,preferred:true};
+  const marked=candidates.filter(t=>markedTargetIds.includes(t.targetId));
+  if(marked.length===1)return {kind:'reuse',target:marked[0]};
+  if(candidates.length===1)return {kind:'reuse',target:candidates[0],claimed:true};
+  return {kind:'create',isolatedFromDuplicates:candidates.length>1||marked.length>1};
+}
 function escapeHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function normalizeText(s){return String(s??'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim()}
 function cssRgbFromHex(value){
@@ -140,7 +148,7 @@ async function probeNewEditorAccess(cdp,writeUrl){
     await cdp.send('Target.closeTarget',{targetId:created.targetId}).catch(()=>{});
   }
 }
-async function getOrCreateAutomationEditorTarget(cdp,targets,writeUrl,blogId){
+async function getOrCreateAutomationEditorTarget(cdp,targets,writeUrl,blogId,preferredTargetId=''){
   const candidates=targets.filter(t=>isAuthorizedNaverUrl(t.url,blogId,{allowWrite:true}));
   const marked=[];
   for(const target of candidates){
@@ -150,12 +158,18 @@ async function getOrCreateAutomationEditorTarget(cdp,targets,writeUrl,blogId){
       if(marker==='NTE_AUTOMATION_EDITOR') marked.push(target);
     }catch{}
   }
-  if(marked.length>1) throw new Error('MULTIPLE_MARKED_EDITOR_TABS');
-  if(marked.length===1) return {target:marked[0],reused:true};
-  if(candidates.length>1) throw new Error('MULTIPLE_EDITOR_TABS_REQUIRE_SINGLE_TAB');
-  if(candidates.length===1) return {target:candidates[0],reused:true,claimed:true};
+  const decision=chooseEditorTargetAction(candidates,marked.map(t=>t.targetId),preferredTargetId);
+  if(decision.kind==='reuse') return {target:decision.target,reused:true,preferred:!!decision.preferred,claimed:!!decision.claimed};
+  // 여러 네이버 탭 중 하나를 추측해서 조작하지 않는다. 기존 탭은 그대로 두고
+  // 자동화 전용 새 편집기를 만든 뒤 targetId로 다음 단계까지 고정한다.
   const created=await cdp.send('Target.createTarget',{url:writeUrl,newWindow:false});
-  return {target:{targetId:created.targetId,url:writeUrl,type:'page'},reused:false};
+  return {target:{targetId:created.targetId,url:writeUrl,type:'page'},reused:false,isolatedFromDuplicates:!!decision.isolatedFromDuplicates};
+}
+async function getTargetWindowBounds(cdp,targetId){
+  const {bounds={}}=await cdp.send('Browser.getWindowForTarget',{targetId});
+  const required=['left','top','width','height'];
+  if(required.some(k=>!Number.isFinite(Number(bounds[k])))) throw new Error('TARGET_WINDOW_BOUNDS_UNAVAILABLE');
+  return Object.fromEntries(required.map(k=>[k,Math.round(Number(bounds[k]))]));
 }
 async function verifyOwnerLogin(cdp,attached,blogId){
   const expression=`(()=>({loggedIn:!!document.querySelector('#gnb_my'),owner:!!document.querySelector('a[href*="admin.blog.naver.com"],a[href*="/${blogId}/postwrite"],a[href*="/${blogId}?Redirect=Write"]'),url:location.href}))()`;
@@ -183,26 +197,28 @@ async function dismissRecoveryDialog(cdp,sessionId,contextId){
   await waitFor(cdp,sessionId,`!document.body.innerText.replace(/\\s+/g,'').includes('작성중인글이있습니다')`,{contextId,timeout:5000});
   return true;
 }
-async function nativePaste(cdp,sessionId,contextId,selector,mode,payload,runDir,name,{selectAll=false,skipClick=false}={}){
+async function nativePaste(cdp,targetId,sessionId,contextId,selector,mode,payload,runDir,name,{selectAll=false,skipClick=false}={}){
   const encoded=JSON.stringify(selector);
   const metrics=await waitFor(cdp,sessionId,`(()=>{const e=document.querySelector(${encoded});if(!e)return null;e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();return r.width>0&&r.height>0?{x:r.x+Math.min(12,r.width/2),y:r.y+Math.min(12,r.height/2),width:innerWidth,height:innerHeight,scale:devicePixelRatio}:null})()`,{contextId});
   const payloadPath=path.join(runDir,`.native-${name}.${mode==='Html'?'html':'txt'}`);
   fs.mkdirSync(runDir,{recursive:true});
   fs.writeFileSync(payloadPath,String(payload),'utf8');
   const helper=path.join(path.dirname(fileURLToPath(import.meta.url)),'크롬네이티브입력.ps1');
-  const args=['-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',helper,'-ViewportX',String(metrics.x),'-ViewportY',String(metrics.y),'-ViewportWidth',String(metrics.width),'-ViewportHeight',String(metrics.height),'-DeviceScaleFactor',String(metrics.scale),'-Mode',mode,'-PayloadPath',payloadPath];
+  const bounds=await getTargetWindowBounds(cdp,targetId);
+  const args=['-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',helper,'-ViewportX',String(metrics.x),'-ViewportY',String(metrics.y),'-ViewportWidth',String(metrics.width),'-ViewportHeight',String(metrics.height),'-DeviceScaleFactor',String(metrics.scale),'-ExpectedLeft',String(bounds.left),'-ExpectedTop',String(bounds.top),'-ExpectedWidth',String(bounds.width),'-ExpectedHeight',String(bounds.height),'-Mode',mode,'-PayloadPath',payloadPath];
   if(selectAll)args.push('-SelectAll');
   if(skipClick)args.push('-SkipClick');
   const output=execFileSync('powershell.exe',args,{stdio:['ignore','pipe','pipe'],windowsHide:true,encoding:'utf8'});
   fs.appendFileSync(path.join(runDir,'native-input.log'),`${name}\t${output.trim()}\n`,'utf8');
   return metrics;
 }
-async function nativeSelectExactParagraph(cdp,sessionId,contextId,text,runDir,name){
+async function nativeSelectExactParagraph(cdp,targetId,sessionId,contextId,text,runDir,name){
   const expected=JSON.stringify(normalizeText(text));
   const metrics=await waitFor(cdp,sessionId,`(()=>{const normalize=s=>String(s||'').replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim();const matches=[...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].filter(p=>normalize(p.textContent)===${expected});if(matches.length!==1)return null;const e=matches[0];e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();return r.width>0&&r.height>0?{x:r.x+Math.min(12,r.width/2),y:r.y+Math.min(12,r.height/2),width:innerWidth,height:innerHeight,scale:devicePixelRatio}:null})()`,{contextId});
   const payloadPath=path.join(runDir,`.native-${name}.txt`);fs.writeFileSync(payloadPath,'','utf8');
   const helper=path.join(path.dirname(fileURLToPath(import.meta.url)),'크롬네이티브입력.ps1');
-  const args=['-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',helper,'-ViewportX',String(metrics.x),'-ViewportY',String(metrics.y),'-ViewportWidth',String(metrics.width),'-ViewportHeight',String(metrics.height),'-DeviceScaleFactor',String(metrics.scale),'-Mode','Click','-PayloadPath',payloadPath];
+  const bounds=await getTargetWindowBounds(cdp,targetId);
+  const args=['-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',helper,'-ViewportX',String(metrics.x),'-ViewportY',String(metrics.y),'-ViewportWidth',String(metrics.width),'-ViewportHeight',String(metrics.height),'-DeviceScaleFactor',String(metrics.scale),'-ExpectedLeft',String(bounds.left),'-ExpectedTop',String(bounds.top),'-ExpectedWidth',String(bounds.width),'-ExpectedHeight',String(bounds.height),'-Mode','Click','-PayloadPath',payloadPath];
   const output=execFileSync('powershell.exe',args,{stdio:['ignore','pipe','pipe'],windowsHide:true,encoding:'utf8'});
   fs.appendFileSync(path.join(runDir,'native-input.log'),`${name}\t${output.trim()}\n`,'utf8');
 }
@@ -298,9 +314,9 @@ async function inspectImagesSequentially(cdp,attached,contextId,count){
   }
   return images;
 }
-async function uploadImageAtAnchor(cdp,attached,contextId,action,runDir){
+async function uploadImageAtAnchor(cdp,targetId,attached,contextId,action,runDir){
   if(!fs.existsSync(action.path)) throw new Error(`IMAGE_FILE_MISSING:${action.path}`);
-  await nativeSelectExactParagraph(cdp,attached.sessionId,contextId,action.anchorText,runDir,`anchor-${action.anchorId}`);
+  await nativeSelectExactParagraph(cdp,targetId,attached.sessionId,contextId,action.anchorText,runDir,`anchor-${action.anchorId}`);
   const beforeSources=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('img.se-image-resource')].map(i=>i.src)`,contextId);
   const before=beforeSources.length;
   let resolveChooser,rejectChooser;
@@ -321,7 +337,7 @@ async function uploadImageAtAnchor(cdp,attached,contextId,action,runDir){
     await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:imageRect.x,y:imageRect.y,button:'left',clickCount:1},attached.sessionId);
     await clickVisible(cdp,attached.sessionId,contextId,'.se-property-toolbar-group-toggle-button.se-align-center-toolbar-button');
     await clickVisible(cdp,attached.sessionId,contextId,'.se-resizing-toolbar-button');
-    await nativePaste(cdp,attached.sessionId,contextId,'#resizing-input-width','Text',String(action.displayWidth||400),runDir,`resize-${action.anchorId}`,{selectAll:true});
+    await nativePaste(cdp,targetId,attached.sessionId,contextId,'#resizing-input-width','Text',String(action.displayWidth||400),runDir,`resize-${action.anchorId}`,{selectAll:true});
     await clickVisible(cdp,attached.sessionId,contextId,'.se-custom-layer-resizing-apply-button');
     const width=Number(action.displayWidth||400);
     await waitFor(cdp,attached.sessionId,`[...document.querySelectorAll('img.se-image-resource')].filter(i=>Math.abs(i.getBoundingClientRect().width-${width})<=2).length>${before}`,{contextId,timeout:10000});
@@ -333,20 +349,20 @@ async function uploadImageAtAnchor(cdp,attached,contextId,action,runDir){
     await cdp.send('Page.setInterceptFileChooserDialog',{enabled:false},attached.sessionId).catch(()=>{});
   }
 }
-async function prepareEditor(cdp,attached,contextId,plan){
+async function prepareEditor(cdp,targetId,attached,contextId,plan){
   assertNewPostSafety(await currentUrl(cdp,attached.sessionId),plan.blogId);
   const title=JSON.stringify(plan.title);
-  await nativePaste(cdp,attached.sessionId,contextId,'.se-documentTitle .se-text-paragraph','Text',plan.title,plan.runDir,'title',{selectAll:true});
+  await nativePaste(cdp,targetId,attached.sessionId,contextId,'.se-documentTitle .se-text-paragraph','Text',plan.title,plan.runDir,'title',{selectAll:true});
   await waitFor(cdp,attached.sessionId,`document.querySelector('.se-documentTitle .se-text-paragraph')?.textContent.replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim()===${title}`,{contextId,timeout:5000});
   const bodySelector='.se-component:not(.se-documentTitle) .se-section-text .se-text-paragraph';
   const units=buildInsertionUnits(plan);
-  await nativePaste(cdp,attached.sessionId,contextId,bodySelector,'Html',units.map(unit=>unit.html).join('\n'),plan.runDir,'body-all',{selectAll:true});
+  await nativePaste(cdp,targetId,attached.sessionId,contextId,bodySelector,'Html',units.map(unit=>unit.html).join('\n'),plan.runDir,'body-all',{selectAll:true});
   for(const unit of units){
     if(unit.verifyText){const expected=JSON.stringify(normalizeText(unit.verifyText));await waitFor(cdp,attached.sessionId,`[...document.querySelectorAll('p')].filter(p=>p.textContent.replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim()===${expected}).length===1`,{contextId,timeout:5000})}
   }
   const uploads=[...plan.actions].filter(a=>a.type==='UploadImageAtAnchor').sort((a,b)=>a.order-b.order);
   const uploadedImages=[];
-  for(const upload of uploads) uploadedImages.push(await uploadImageAtAnchor(cdp,attached,contextId,upload,plan.runDir));
+  for(const upload of uploads) uploadedImages.push(await uploadImageAtAnchor(cdp,targetId,attached,contextId,upload,plan.runDir));
   if(uploads.length){
     await waitFor(cdp,attached.sessionId,`document.querySelectorAll('img.se-image-resource').length===${uploads.length}`,{contextId,timeout:10000});
     const anchors=JSON.stringify(uploads.map(x=>normalizeText(x.anchorText)));
@@ -402,12 +418,22 @@ async function main(){
   const port=Number(a.port);const version=await json(`http://127.0.0.1:${port}/json/version`);const cdp=new Cdp(version.webSocketDebuggerUrl);await cdp.connect();
   try{
     const targets=(await cdp.send('Target.getTargets')).targetInfos.filter(t=>t.type==='page');
-    const blogTarget=targets.find(t=>isAuthorizedNaverUrl(t.url,a['blog-id']));
     const auth=await verifyNaverAuthCookies(cdp);
     if(a.mode==='preflight'){
-      const editorProbe=blogTarget?await probeNewEditorAccess(cdp,a['write-url']):{verified:false,reason:'NAVER_TAB_UNAVAILABLE'};
-      const ready=!!(blogTarget&&editorProbe.verified);
-      const out=ready?{status:'Ready',errorCode:'',reason:'전용 Chrome DevTools 연결과 새 글 편집기 접근을 실제로 확인했습니다.',extensionConnected:false,directChromeConnected:true,naverTabReadVerified:true,ownerLoginVerified:true,newEditorAccessVerified:true,browserId:`cdp:${port}`,tabId:blogTarget.targetId,url:blogTarget.url}:{status:'Failed',errorCode:blogTarget?'NAVER_LOGIN_REQUIRED':'NAVER_TAB_UNAVAILABLE',reason:blogTarget?'자동화 전용 Chrome에서 새 글 편집기가 로그인 화면으로 전환되었습니다. 이 전용 Chrome에서 네이버 로그인을 완료한 뒤 다시 실행하세요.':'전용 Chrome에서 네이버 블로그 탭을 확인할 수 없습니다.',extensionConnected:false,directChromeConnected:true,naverTabReadVerified:!!blogTarget,ownerLoginVerified:false,newEditorAccessVerified:false,authCookiePairPresent:auth.verified,browserId:`cdp:${port}`,tabId:blogTarget?.targetId||'',url:blogTarget?.url||'',probeReason:editorProbe.reason||''};
+      let editorProbe={verified:false,reason:'NAVER_EDITOR_NOT_READY'};
+      let selected=null;
+      try{
+        selected=await getOrCreateAutomationEditorTarget(cdp,targets,a['write-url'],a['blog-id']);
+        await cdp.send('Target.activateTarget',{targetId:selected.target.targetId});
+        const attached=await attach(cdp,selected.target.targetId);
+        const context=await findEditorContext(cdp,attached,15000);
+        const url=await currentUrl(cdp,attached.sessionId);
+        assertNewPostSafety(url,a['blog-id']);
+        await evaluate(cdp,attached.sessionId,`window.name='NTE_AUTOMATION_EDITOR';true`).catch(()=>{});
+        editorProbe={verified:true,url,targetId:selected.target.targetId};
+      }catch(e){editorProbe={verified:false,reason:String(e?.message||e)}}
+      const ready=!!(auth.verified&&editorProbe.verified);
+      const out=ready?{status:'Ready',errorCode:'',reason:'전용 Chrome DevTools 연결·로그인·새 글 편집기 URL을 직접 확인했습니다.',extensionConnected:false,directChromeConnected:true,connectionPath:'DedicatedChromeDevTools',naverTabReadVerified:true,ownerLoginVerified:true,newEditorAccessVerified:true,browserId:`cdp:${port}`,tabId:editorProbe.targetId,url:editorProbe.url,duplicateTabsIsolated:!!selected?.isolatedFromDuplicates}:{status:'Failed',errorCode:auth.verified?'NAVER_EDITOR_NOT_READY':'NAVER_LOGIN_REQUIRED',reason:auth.verified?'자동화 전용 Chrome에서 안전한 새 글 편집기를 준비하지 못했습니다.':'자동화 전용 Chrome에서 네이버 로그인이 필요합니다.',extensionConnected:false,directChromeConnected:true,connectionPath:'DedicatedChromeDevTools',naverTabReadVerified:false,ownerLoginVerified:false,newEditorAccessVerified:false,authCookiePairPresent:auth.verified,browserId:`cdp:${port}`,tabId:editorProbe.targetId||'',url:editorProbe.url||'',probeReason:editorProbe.reason||''};
       atomicWrite(a.result,out);return;
     }
     if(a.mode==='tags-current'){
@@ -490,7 +516,7 @@ async function main(){
     const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);const imageManifest=readJson(pkg.imageManifest);validatePlannedImagePaths(plan,imageManifest);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
     const missingImages=plan.actions.filter(x=>x.type==='UploadImageAtAnchor'&&!fs.existsSync(x.path)).map(x=>x.path);
     if(missingImages.length){atomicWrite(a.result,{status:'Blocked',reason:'IMAGE_FILES_REQUIRED',missingImages,publicationSettingsOpened:false,published:false});return}
-    const editorSelection=await getOrCreateAutomationEditorTarget(cdp,targets,a['write-url'],a['blog-id']);
+    const editorSelection=await getOrCreateAutomationEditorTarget(cdp,targets,a['write-url'],a['blog-id'],a['target-id']||'');
     const editorTarget=editorSelection.target;
     await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
     const attached=await attach(cdp,editorTarget.targetId);
@@ -507,7 +533,7 @@ async function main(){
     await dismissRecoveryDialog(cdp,attached.sessionId,context.contextId);
     await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
     await sleep(600);
-    const prepared=await prepareEditor(cdp,attached,context.contextId,plan);
+    const prepared=await prepareEditor(cdp,editorTarget.targetId,attached,context.contextId,plan);
     const stabilizedServerImages=await inspectImagesSequentially(cdp,attached,context.contextId,prepared.imageUploadCount);
     await cleanEditorView(cdp,attached,context.contextId);
     const observed=await inspectEditor(cdp,attached,context.contextId,plan);

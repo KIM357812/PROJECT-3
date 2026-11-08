@@ -6,6 +6,10 @@ param(
     [Parameter(Mandatory=$true)][double]$ViewportWidth,
     [Parameter(Mandatory=$true)][double]$ViewportHeight,
     [Parameter(Mandatory=$true)][double]$DeviceScaleFactor,
+    [Parameter(Mandatory=$true)][int]$ExpectedLeft,
+    [Parameter(Mandatory=$true)][int]$ExpectedTop,
+    [Parameter(Mandatory=$true)][int]$ExpectedWidth,
+    [Parameter(Mandatory=$true)][int]$ExpectedHeight,
     [Parameter(Mandatory=$true)][ValidateSet('Text','Html','Click')][string]$Mode,
     [Parameter(Mandatory=$true)][string]$PayloadPath,
     [switch]$SelectAll,
@@ -81,9 +85,28 @@ function New-CfHtml([string]$Fragment) {
 }
 
 if($Mode -ne 'Click' -and -not(Test-Path -LiteralPath $PayloadPath -PathType Leaf)){throw 'NATIVE_INPUT_PAYLOAD_MISSING'}
-$windows=@(Get-Process chrome -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -match '네이버 블로그.*Chrome$' })
-if($windows.Count -ne 1){throw "NATIVE_INPUT_CHROME_WINDOW_COUNT:$($windows.Count)"}
-$window=$windows[0]
+$windows=@(Get-Process chrome -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 })
+if($windows.Count -lt 1){throw 'NATIVE_INPUT_CHROME_WINDOW_COUNT:0'}
+
+# CDP가 돌려준 대상 탭의 창 경계와 실제 Windows Chrome 창 경계를 대조한다.
+# 일반 Chrome 창이 여러 개여도 제목을 추측하지 않고 목표 탭이 속한 창 하나만 고른다.
+$matches=@()
+foreach($candidate in $windows){
+    $candidateRect=New-Object NteNativeInput+RECT
+    if(-not[NteNativeInput]::GetWindowRect([IntPtr]$candidate.MainWindowHandle,[ref]$candidateRect)){continue}
+    $actualWidth=$candidateRect.Right-$candidateRect.Left
+    $actualHeight=$candidateRect.Bottom-$candidateRect.Top
+    $rawDistance=[math]::Abs($candidateRect.Left-$ExpectedLeft)+[math]::Abs($candidateRect.Top-$ExpectedTop)+[math]::Abs($actualWidth-$ExpectedWidth)+[math]::Abs($actualHeight-$ExpectedHeight)
+    $scaledDistance=[math]::Abs($candidateRect.Left-[math]::Round($ExpectedLeft*$DeviceScaleFactor))+[math]::Abs($candidateRect.Top-[math]::Round($ExpectedTop*$DeviceScaleFactor))+[math]::Abs($actualWidth-[math]::Round($ExpectedWidth*$DeviceScaleFactor))+[math]::Abs($actualHeight-[math]::Round($ExpectedHeight*$DeviceScaleFactor))
+    $matches += [pscustomobject]@{Process=$candidate;Rect=$candidateRect;Distance=[math]::Min($rawDistance,$scaledDistance)}
+}
+$best=@($matches|Sort-Object Distance,{$_.Process.Id})
+if($best.Count -lt 1 -or $best[0].Distance -gt 120){
+    $summary=($best|Select-Object -First 4|ForEach-Object{"$($_.Process.Id):$($_.Distance)"}) -join ','
+    throw "NATIVE_INPUT_TARGET_WINDOW_NOT_FOUND:$summary"
+}
+if($best.Count -gt 1 -and $best[0].Distance -eq $best[1].Distance){throw "NATIVE_INPUT_TARGET_WINDOW_AMBIGUOUS:$($best[0].Distance)"}
+$window=$best[0].Process
 $handle=[IntPtr]$window.MainWindowHandle
 $rect=New-Object NteNativeInput+RECT
 if(-not[NteNativeInput]::GetWindowRect($handle,[ref]$rect)){throw 'NATIVE_INPUT_WINDOW_RECT_FAILED'}
@@ -128,4 +151,4 @@ if($Mode -ne 'Click'){
 }
 $point=New-Object NteNativeInput+POINT
 $null=[NteNativeInput]::GetCursorPos([ref]$point)
-[pscustomobject]@{status='InputSent';windowTitle=$window.MainWindowTitle;windowHandle=[long]$handle;foregroundHandle=[long][NteNativeInput]::GetForegroundWindow();dpiAwarenessSet=([long]$dpiResult -ne 0);x=$screenX;y=$screenY;cursorX=$point.X;cursorY=$point.Y;mode=$Mode;windowRect=@{left=$rect.Left;top=$rect.Top;right=$rect.Right;bottom=$rect.Bottom};contentOrigin=@{left=$contentLeft;top=$contentTop};viewport=@{width=$ViewportWidth;height=$ViewportHeight;scale=$DeviceScaleFactor}}|ConvertTo-Json -Compress -Depth 4
+[pscustomobject]@{status='InputSent';windowTitle=$window.MainWindowTitle;windowHandle=[long]$handle;windowMatchDistance=$best[0].Distance;foregroundHandle=[long][NteNativeInput]::GetForegroundWindow();dpiAwarenessSet=([long]$dpiResult -ne 0);x=$screenX;y=$screenY;cursorX=$point.X;cursorY=$point.Y;mode=$Mode;windowRect=@{left=$rect.Left;top=$rect.Top;right=$rect.Right;bottom=$rect.Bottom};contentOrigin=@{left=$contentLeft;top=$contentTop};viewport=@{width=$ViewportWidth;height=$ViewportHeight;scale=$DeviceScaleFactor}}|ConvertTo-Json -Compress -Depth 4
