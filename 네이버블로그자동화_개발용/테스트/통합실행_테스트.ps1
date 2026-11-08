@@ -58,6 +58,7 @@ try {
     $measurementPath=Join-Path $root 'measurementFile'
     $mode=@{
         horizontalOverflow=$false
+        headingSpacingVerified=$true
         imageFileNames=@('01.jpg','02.jpg')
         imageServerUrls=@('https://blogfiles.pstatic.net/a/01.jpg','https://blogfiles.pstatic.net/a/02.jpg')
         rawUrlVisible=$false
@@ -65,7 +66,7 @@ try {
     $pc=@{}+$mode
     $pc.sourceLinks=@(@{text='원문';href='https://example.com/article'})
     @{schemaVersion=1;measurementSource='RenderedNaverDomAndScreen';pc=$pc;mobile=$mode;secondPass=@{
-        wholeArticleFromStart=$true;titleVerified=$true;bodyVerified=$true;headingsVerified=$true;imagesVerified=$true;linksVerified=$true
+        wholeArticleFromStart=$true;titleVerified=$true;bodyVerified=$true;headingsVerified=$true;headingSpacingVerified=$true;imagesVerified=$true;linksVerified=$true
     }} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $measurementPath -Encoding UTF8
     $r=[pscustomobject]@{runId='test';status='Verified';reason='';publicationSettingsOpened=$false;published=$false;editorUrl='https://blog.naver.com/ij1128?Redirect=Write&'}
     foreach($n in @('imagesGenerated','imagesOptimized','imagesUploaded','titleVerified','bodyVerified','linksVerified','tagsVerified','formatVerified','mobileVerified','secondPassVerified')){$r|Add-Member $n $true}

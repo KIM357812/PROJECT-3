@@ -62,6 +62,9 @@ function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$
         if ($mode.horizontalOverflow -isnot [bool] -or [bool]$mode.horizontalOverflow) {
             throw "가로 넘침 검증 실패: $modeName"
         }
+        if($mode.headingSpacingVerified -isnot [bool] -or -not [bool]$mode.headingSpacingVerified){
+            throw "소제목 위아래 간격 검증 실패: $modeName"
+        }
         $observedNames = @($mode.imageFileNames | ForEach-Object { [string]$_ })
         if (($expectedImageNames -join "`n") -ne ($observedNames -join "`n")) {
             throw "이미지 개수·순서 검증 실패: $modeName"
@@ -86,7 +89,7 @@ function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$
         }
     }
     $second = $measurement.secondPass
-    foreach ($name in @('wholeArticleFromStart','titleVerified','bodyVerified','headingsVerified','imagesVerified','linksVerified')) {
+    foreach ($name in @('wholeArticleFromStart','titleVerified','bodyVerified','headingsVerified','headingSpacingVerified','imagesVerified','linksVerified')) {
         if ($second.$name -isnot [bool] -or $second.$name -ne $true) {
             throw "전체 2차 검증 증거 누락: $name"
         }

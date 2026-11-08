@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths,chooseEditorTargetAction} from '../프로그램/크롬직접실행.mjs';
+import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths,chooseEditorTargetAction,buildHeadingSpecs} from '../프로그램/크롬직접실행.mjs';
 
 test('argument parser keeps Korean and spaced paths as values',()=>{
   assert.deepEqual(parseArgs(['--mode','execute','--package','C:\\한글 폴더\\실행패키지.json']),{mode:'execute',package:'C:\\한글 폴더\\실행패키지.json'});
@@ -15,9 +15,9 @@ test('only the configured Naver blog and a new editor are accepted',()=>{
 test('plan becomes atomic units and never merges headings with body',()=>{
   const plan={actions:[
     {order:1,type:'PasteStandaloneParagraphBlock',path:'body'},
-    {order:2,type:'InsertVerticalSpacer',heightPx:32},
+    {order:2,type:'InsertVerticalSpacer',heightPx:32,naverFontSizePx:16,naverLineHeightPercent:200},
     {order:3,type:'InsertStandaloneHeading',text:'소제목',fontSizePx:19,lineHeightPx:27,level:2,textColor:'#4A78E0',underline:false,underlineOffsetPx:0,underlineThicknessPx:0,underlineColor:''},
-    {order:4,type:'InsertVerticalSpacer',heightPx:21},
+    {order:4,type:'InsertVerticalSpacer',heightPx:21,naverFontSizePx:13,naverLineHeightPercent:160},
     {order:5,type:'InsertImageAnchor',anchorId:'I1',text:'[[I1]]'}
   ]};
   const units=buildInsertionUnits(plan,p=>p==='body'?'<p>본문</p>':'');
@@ -25,10 +25,26 @@ test('plan becomes atomic units and never merges headings with body',()=>{
   assert.deepEqual(units.map(x=>x.kind),['PasteStandaloneParagraphBlock','spacer','heading','spacer','image-anchor']);
   assert.equal(units[2].verifyText,'소제목');
   assert.equal(units[0].html.includes('소제목'),false);
-  assert.match(units[1].html,/font-size:32px;line-height:32px/);
+  assert.match(units[1].html,/font-size:16px;line-height:200%/);
+  assert.match(units[1].html,/data-nte-height="32"/);
   assert.match(units[2].html,/font-size:19px/);
   assert.match(units[2].html,/<span data-nte-heading-color="true" style="color:#4A78E0">소제목<\/span>/);
   assert.doesNotMatch(units[2].html,/<u\b|text-decoration|border-bottom/);
+});
+test('mobile heading specs require the PC top and bottom hierarchy',()=>{
+  const plan={mobileHeadingSpacing:{tolerancePx:4,dominancePx:6},actions:[
+    {order:1,type:'PasteStandaloneParagraphBlock'},
+    {order:2,type:'InsertVerticalSpacer',heightPx:32},
+    {order:3,type:'InsertStandaloneHeading',text:'큰 소제목',level:2,fontSizePx:19,textColor:'#4A78E0'},
+    {order:4,type:'InsertVerticalSpacer',heightPx:21},
+    {order:5,type:'PasteStandaloneParagraphBlock'},
+    {order:6,type:'InsertVerticalSpacer',heightPx:24},
+    {order:7,type:'InsertStandaloneHeading',text:'작은 소제목',level:3,fontSizePx:16,textColor:'#111111'},
+    {order:8,type:'InsertVerticalSpacer',heightPx:12},
+    {order:9,type:'PasteStandaloneParagraphBlock'}
+  ]};
+  const specs=buildHeadingSpecs(plan);
+  assert.deepEqual(specs.map(s=>[s.level,s.expectedTopPx,s.expectedBottomPx,s.requireGapDominance]),[[2,32,21,true],[3,24,12,true]]);
 });
 test('clipboard unit keeps only body fragment and never leaks HTML title',()=>{
   const fragment=extractHtmlBodyFragment('<!doctype html><html><head><title>네이버 독립 입력 블록 9</title></head><body><p>실제 본문</p><script>bad()</script></body></html>');

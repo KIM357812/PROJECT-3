@@ -239,6 +239,10 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $fontSize = if ($level -eq 2) { [int]$Formatting.SectionHeadingFontSizePx } else { [int]$Formatting.SubheadingFontSizePx }
             $topPx = if ($level -eq 2) { [int]$Formatting.SectionHeadingTopPx } else { [int]$Formatting.SubheadingTopPx }
             $bottomPx = if ($level -eq 2) { [int]$Formatting.SectionHeadingBottomPx } else { [int]$Formatting.SubheadingBottomPx }
+            $topNativeFontPx = if ($level -eq 2) { 16 } else { 15 }
+            $topNativeLineHeightPercent = if ($level -eq 2) { 200 } else { 160 }
+            $bottomNativeFontPx = if ($level -eq 2) { 13 } else { 12 }
+            $bottomNativeLineHeightPercent = if ($level -eq 2) { 160 } else { 100 }
             $underline = if ($level -eq 2) { [bool]$Formatting.SectionHeadingUnderline } else { [bool]$Formatting.SubheadingUnderline }
             $underlineOffset = if ($level -eq 2) { [int]$Formatting.SectionHeadingUnderlineOffsetPx } else { 0 }
             $underlineThickness = if ($level -eq 2) { [int]$Formatting.SectionHeadingUnderlineThicknessPx } else { 0 }
@@ -252,6 +256,8 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
                     [string]$previousHeading.type -eq 'InsertStandaloneHeading' -and [int]$previousHeading.level -eq 2) {
                     $previousSpacer.purpose = 'ParentHeadingToSubheading'
                     $previousSpacer.heightPx = [int]$Formatting.ParentHeadingToSubheadingPx
+                    $previousSpacer.naverFontSizePx = 12
+                    $previousSpacer.naverLineHeightPercent = 100
                     $previousSpacer.postcondition.measuredHeightPx = [int]$Formatting.ParentHeadingToSubheadingPx
                     $parentAdjacent = $true
                 }
@@ -268,7 +274,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             if (-not $parentAdjacent -and -not $tableAdjacent) {
                 $Actions.Add([pscustomobject]@{
                     order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingTop'; headingLevel=$level
-                    heightPx=$topPx; naverFontSizePx=16; naverLineHeightPercent=200
+                    heightPx=$topPx; naverFontSizePx=$topNativeFontPx; naverLineHeightPercent=$topNativeLineHeightPercent
                     postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$topPx }
                 })
             }
@@ -280,7 +286,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             })
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'; headingLevel=$level
-                heightPx=$bottomPx; naverFontSizePx=13; naverLineHeightPercent=160
+                heightPx=$bottomPx; naverFontSizePx=$bottomNativeFontPx; naverLineHeightPercent=$bottomNativeLineHeightPercent
                 postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$bottomPx; tolerancePx=0.5 }
             })
             continue
@@ -662,6 +668,16 @@ $plan = [pscustomobject]@{
     actions = @($actions.ToArray())
     atomicBlockCount = $blockSequence
     headingInsertionMode = 'StandaloneParagraphWithMeasuredSpacers'
+    mobileHeadingSpacing = [pscustomobject]@{
+        required = [bool]$config.EditorFormatting.RequireMobileHeadingGapValidation
+        tolerancePx = [int]$config.EditorFormatting.MobileHeadingGapTolerancePx
+        dominancePx = [int]$config.EditorFormatting.MobileHeadingGapDominancePx
+        sectionTopPx = [int]$config.EditorFormatting.SectionHeadingTopPx
+        sectionBottomPx = [int]$config.EditorFormatting.SectionHeadingBottomPx
+        subheadingTopPx = [int]$config.EditorFormatting.SubheadingTopPx
+        subheadingBottomPx = [int]$config.EditorFormatting.SubheadingBottomPx
+        parentToSubheadingPx = [int]$config.EditorFormatting.ParentHeadingToSubheadingPx
+    }
     stopPoint = 'BeforePublicationSettings'
     publicationSettingsOpened = $false
     publicPublishPerformed = $false
