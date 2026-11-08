@@ -66,13 +66,13 @@ function ConvertTo-NaverHtml([string]$Fragment, [object]$Formatting) {
     $result = [regex]::Replace($result, '(?i)font-size\s*:\s*16px', ('font-size:{0}px' -f [int]$Formatting.BodyFontSizePx))
     $result = [regex]::Replace($result, '(?is)<h2\b[^>]*>(?<text>.*?)</h2>', {
         param($match)
-        '<div data-naver-role="section-heading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;text-decoration-line:underline;text-underline-offset:{3}px;text-decoration-thickness:{4}px;text-decoration-color:{5};color:#111;text-align:left;word-break:keep-all;">{6}</p></div>' -f
+        '<div data-naver-role="section-heading" style="width:100%;margin:{0}px 0 {1}px 0;box-sizing:border-box;"><p style="margin:0;font-size:{2}px;line-height:27px;font-weight:700;text-align:left;word-break:keep-all;"><span style="color:{5};">{6}</span></p></div>' -f
             [int]$Formatting.SectionHeadingTopPx,
             [int]$Formatting.SectionHeadingBottomPx,
             [int]$Formatting.SectionHeadingFontSizePx,
             [int]$Formatting.SectionHeadingUnderlineOffsetPx,
             [int]$Formatting.SectionHeadingUnderlineThicknessPx,
-            [string]$Formatting.SectionHeadingUnderlineColor,
+            [string]$Formatting.SectionHeadingColor,
             $match.Groups['text'].Value
     })
     $result = [regex]::Replace($result, '(?is)<h3\b[^>]*>(?<text>.*?)</h3>', {
@@ -242,6 +242,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $underlineOffset = if ($level -eq 2) { [int]$Formatting.SectionHeadingUnderlineOffsetPx } else { 0 }
             $underlineThickness = if ($level -eq 2) { [int]$Formatting.SectionHeadingUnderlineThicknessPx } else { 0 }
             $underlineColor = if ($level -eq 2) { [string]$Formatting.SectionHeadingUnderlineColor } else { '' }
+            $textColor = if ($level -eq 2) { [string]$Formatting.SectionHeadingColor } else { '#111111' }
             $parentAdjacent = $false
             if ($level -eq 3 -and $Actions.Count -ge 2) {
                 $previousSpacer = $Actions[$Actions.Count - 1]
@@ -273,7 +274,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertStandaloneHeading'; level=$level
                 text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
-                fontSizePx=$fontSize; bold=$true; underline=$underline; underlineOffsetPx=$underlineOffset; underlineThicknessPx=$underlineThickness; underlineColor=$underlineColor; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
+                fontSizePx=$fontSize; bold=$true; textColor=$textColor; underline=$underline; underlineOffsetPx=$underlineOffset; underlineThicknessPx=$underlineThickness; underlineColor=$underlineColor; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
                 postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
             })
             $Actions.Add([pscustomobject]@{
@@ -371,11 +372,13 @@ function Assert-AtomicEditorPlan([object[]]$Actions, [object]$Formatting) {
             if (-not $validBottom) { throw "독립 H$level 소제목 아래 간격 동작이 올바르지 않습니다." }
             if ([string]::IsNullOrWhiteSpace([string]$action.text) -or
                 -not [bool]$action.bold -or
-                ($level -eq 2 -and -not [bool]$action.underline) -or
+                ($level -eq 2 -and [bool]$action.underline) -or
                 ($level -eq 3 -and [bool]$action.underline) -or
                 ($level -eq 2 -and [int]$action.underlineOffsetPx -ne [int]$Formatting.SectionHeadingUnderlineOffsetPx) -or
                 ($level -eq 2 -and [int]$action.underlineThicknessPx -ne [int]$Formatting.SectionHeadingUnderlineThicknessPx) -or
                 ($level -eq 2 -and [string]$action.underlineColor -ne [string]$Formatting.SectionHeadingUnderlineColor) -or
+                ($level -eq 2 -and [string]$action.textColor -ne [string]$Formatting.SectionHeadingColor) -or
+                ($level -eq 3 -and [string]$action.textColor -ne '#111111') -or
                 ($level -eq 2 -and [int]$action.fontSizePx -ne [int]$Formatting.SectionHeadingFontSizePx) -or
                 ($level -eq 3 -and [int]$action.fontSizePx -ne [int]$Formatting.SubheadingFontSizePx) -or
                 -not [bool]$action.resetInlineFormattingBefore -or

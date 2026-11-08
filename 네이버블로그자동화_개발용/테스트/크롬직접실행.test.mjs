@@ -16,7 +16,7 @@ test('plan becomes atomic units and never merges headings with body',()=>{
   const plan={actions:[
     {order:1,type:'PasteStandaloneParagraphBlock',path:'body'},
     {order:2,type:'InsertVerticalSpacer',heightPx:32},
-    {order:3,type:'InsertStandaloneHeading',text:'소제목',fontSizePx:19,lineHeightPx:27,level:2,underline:true,underlineOffsetPx:2,underlineThicknessPx:1,underlineColor:'#3F6CD4'},
+    {order:3,type:'InsertStandaloneHeading',text:'소제목',fontSizePx:19,lineHeightPx:27,level:2,textColor:'#4A78E0',underline:false,underlineOffsetPx:0,underlineThicknessPx:0,underlineColor:''},
     {order:4,type:'InsertVerticalSpacer',heightPx:21},
     {order:5,type:'InsertImageAnchor',anchorId:'I1',text:'[[I1]]'}
   ]};
@@ -27,7 +27,8 @@ test('plan becomes atomic units and never merges headings with body',()=>{
   assert.equal(units[0].html.includes('소제목'),false);
   assert.match(units[1].html,/font-size:32px;line-height:32px/);
   assert.match(units[2].html,/font-size:19px/);
-  assert.match(units[2].html,/<span data-nte-heading-underline="true" style="color:#3F6CD4"><u style="text-decoration-line:underline;text-decoration-thickness:1px;text-underline-offset:2px"><span style="color:#111">소제목<\/span><\/u><\/span>/);
+  assert.match(units[2].html,/<span data-nte-heading-color="true" style="color:#4A78E0">소제목<\/span>/);
+  assert.doesNotMatch(units[2].html,/<u\b|text-decoration|border-bottom/);
 });
 test('clipboard unit keeps only body fragment and never leaks HTML title',()=>{
   const fragment=extractHtmlBodyFragment('<!doctype html><html><head><title>네이버 독립 입력 블록 9</title></head><body><p>실제 본문</p><script>bad()</script></body></html>');

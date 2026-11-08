@@ -69,8 +69,7 @@ try {
         Assert-True $validBefore "H$($headingAction.level) 위 독립 간격"
         $validAfter = ($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom' -and $afterHeading.heightPx -eq $expectedBottom) -or ($afterHeading.type -eq 'InsertImageAnchor' -and [bool]$afterHeading.postcondition.requireDirectlyAfterHeadingWhenApplicable)
         Assert-True $validAfter "H$($headingAction.level) 아래 간격 또는 직접 이미지 연결"
-        Assert-True (($headingAction.level -eq 2 -and $headingAction.fontSizePx -eq 19 -and [bool]$headingAction.underline) -or ($headingAction.level -eq 3 -and $headingAction.fontSizePx -eq 16 -and -not [bool]$headingAction.underline)) 'H2/H3 크기·밑줄 계층'
-        if ($headingAction.level -eq 2) { Assert-True ($headingAction.underlineOffsetPx -eq 2 -and $headingAction.underlineThicknessPx -eq 1 -and $headingAction.underlineColor -eq '#3F6CD4') 'H2 제목 폭 밑줄 2px 오프셋·1px 링크 파란색 기준' }
+        Assert-True (($headingAction.level -eq 2 -and $headingAction.fontSizePx -eq 19 -and -not [bool]$headingAction.underline -and $headingAction.textColor -eq '#4A78E0') -or ($headingAction.level -eq 3 -and $headingAction.fontSizePx -eq 16 -and -not [bool]$headingAction.underline -and $headingAction.textColor -eq '#111111')) 'H2/H3 크기·색상·밑줄 없음 계층'
         Assert-True ([bool]$headingAction.postcondition.requireStandaloneParagraph) '소제목 독립 문단 사후조건'
         Assert-True ([bool]$headingAction.postcondition.forbidMergedPreviousText -and [bool]$headingAction.postcondition.forbidMergedNextText) '소제목 앞뒤 본문 합침 금지'
     }
@@ -105,7 +104,7 @@ try {
     Assert-True ($segmentText -match 'line-height:27px') '본문 27px 줄높이 기준'
     Assert-True ($segmentText -match 'line-height:24px') '바탕색 상자 24px 줄높이 기준'
     Assert-True ($segmentText -match 'margin:32px 0 0 0') '참고자료 위 32px 기준'
-    Assert-True ($segmentText -match 'text-underline-offset:2px' -and $segmentText -match 'text-decoration-thickness:1px' -and $segmentText -match 'text-decoration-color:#3F6CD4') 'H2 글자 폭 밑줄·2px 간격·파란색 기준'
+    Assert-True ($segmentText -match 'color:#4A78E0' -and $segmentText -notmatch 'text-decoration|border-bottom') 'H2 밝은 블루·밑줄 없음 기준'
     Assert-True ($segmentText -match '<table data-naver-role="reference-group"' -and $segmentText -match 'border:1px solid #D9DDE3' -and $segmentText -match 'data-nte-reference-gap="true" style="display:block;height:6px;' -and $segmentText -notmatch 'aria-hidden="true"') '참고자료·관련 글 단일 무배경 테두리 상자와 6px 내부 간격'
     $tableActions = @($plan.actions | Where-Object blockRole -eq 'DataTable')
     Assert-True ($tableActions.Count -eq 1 -and [bool]$tableActions[0].postcondition.requireDirectlyBeforeHeadingWhenApplicable -and $tableActions[0].postcondition.maximumRenderedHeadingGapPx -eq 30) '표 다음 H2 실제 간격 30px 이하 실행 조건'
@@ -113,7 +112,7 @@ try {
     Assert-True ($blockText -match 'text-align\s*:\s*justify' -and $blockText -match 'text-align-last\s*:\s*left') '본문 오른쪽 끝 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
     $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
-    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 오프셋 2px','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 테두리')) {
+    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 없음','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 외곽선')) {
         Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
     }
     Assert-True ($promptText -match '(?i)text-align:\s*justify\s*;\s*text-align-last:\s*left') '프롬프트 본문 양쪽 정렬과 마지막 줄 왼쪽 정렬'

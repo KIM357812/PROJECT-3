@@ -22,6 +22,13 @@ public static class NteNativeInput {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SetActiveWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
@@ -31,6 +38,33 @@ public static class NteNativeInput {
 '@
 $dpiResult=[NteNativeInput]::SetProcessDpiAwarenessContext([IntPtr](-4))
 Add-Type -AssemblyName System.Windows.Forms
+
+function Set-NteForegroundWindow([IntPtr]$Handle) {
+    $null=[NteNativeInput]::ShowWindowAsync($Handle,9)
+    $null=[NteNativeInput]::ShowWindow($Handle,9)
+    if([NteNativeInput]::SetForegroundWindow($Handle) -and [NteNativeInput]::GetForegroundWindow() -eq $Handle){ return $true }
+
+    # Windows는 백그라운드 프로세스의 포커스 탈취를 제한합니다. 현재 전경 창의
+    # 입력 스레드에 잠시 연결해, 사용자 소유의 단일 네이버 Chrome 창만 활성화합니다.
+    $foreground=[NteNativeInput]::GetForegroundWindow()
+    $currentThread=[NteNativeInput]::GetCurrentThreadId()
+    $foregroundThread=if($foreground -ne [IntPtr]::Zero){[NteNativeInput]::GetWindowThreadProcessId($foreground,[IntPtr]::Zero)}else{0}
+    $attached=$false
+    try {
+        if($foregroundThread -ne 0 -and $foregroundThread -ne $currentThread){
+            $attached=[NteNativeInput]::AttachThreadInput($currentThread,$foregroundThread,$true)
+        }
+        $null=[NteNativeInput]::BringWindowToTop($Handle)
+        $null=[NteNativeInput]::SetActiveWindow($Handle)
+        $null=[NteNativeInput]::SetFocus($Handle)
+        $null=[NteNativeInput]::SetForegroundWindow($Handle)
+    }
+    finally {
+        if($attached){$null=[NteNativeInput]::AttachThreadInput($currentThread,$foregroundThread,$false)}
+    }
+    Start-Sleep -Milliseconds 120
+    return ([NteNativeInput]::GetForegroundWindow() -eq $Handle)
+}
 
 function New-CfHtml([string]$Fragment) {
     $prefix='<html><body><!--StartFragment-->'
@@ -63,7 +97,7 @@ $screenX=[int][math]::Round($contentLeft+$ViewportX*$DeviceScaleFactor)
 $screenY=[int][math]::Round($contentTop+$ViewportY*$DeviceScaleFactor)
 
 $null=[NteNativeInput]::ShowWindow($handle,9)
-if(-not[NteNativeInput]::SetForegroundWindow($handle)){throw 'NATIVE_INPUT_ACTIVATE_FAILED'}
+if(-not(Set-NteForegroundWindow $handle)){throw 'NATIVE_INPUT_ACTIVATE_FAILED'}
 Start-Sleep -Milliseconds 250
 if(-not $SkipClick){
     if(-not[NteNativeInput]::SetCursorPos($screenX,$screenY)){throw 'NATIVE_INPUT_CURSOR_FAILED'}
