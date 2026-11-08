@@ -59,11 +59,18 @@ function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$
     foreach ($modeName in @('pc','mobile')) {
         $mode = $measurement.$modeName
         if ($null -eq $mode) { throw "화면 측정 증거 누락: $modeName" }
+        $expectedPreviewMode = if ($modeName -eq 'pc') { 'desktop' } else { 'mobile' }
+        if ([string]$mode.previewMode -ne $expectedPreviewMode) {
+            throw "네이버 공식 화면 전환 검증 실패: $modeName"
+        }
         if ($mode.horizontalOverflow -isnot [bool] -or [bool]$mode.horizontalOverflow) {
             throw "가로 넘침 검증 실패: $modeName"
         }
         if($mode.headingSpacingVerified -isnot [bool] -or -not [bool]$mode.headingSpacingVerified){
             throw "소제목 위아래 간격 검증 실패: $modeName"
+        }
+        if($modeName -eq 'mobile' -and ($mode.headingLineHeightVerified -isnot [bool] -or -not [bool]$mode.headingLineHeightVerified)){
+            throw '모바일 여러 줄 소제목 줄높이 검증 실패'
         }
         $observedNames = @($mode.imageFileNames | ForEach-Object { [string]$_ })
         if (($expectedImageNames -join "`n") -ne ($observedNames -join "`n")) {
@@ -89,7 +96,7 @@ function Assert-NaverRunResult($Result, [string]$RunId, [string]$Root, [string]$
         }
     }
     $second = $measurement.secondPass
-    foreach ($name in @('wholeArticleFromStart','titleVerified','bodyVerified','headingsVerified','headingSpacingVerified','imagesVerified','linksVerified')) {
+    foreach ($name in @('wholeArticleFromStart','titleVerified','bodyVerified','headingsVerified','headingSpacingVerified','headingLineHeightVerified','imagesVerified','linksVerified')) {
         if ($second.$name -isnot [bool] -or $second.$name -ne $true) {
             throw "전체 2차 검증 증거 누락: $name"
         }

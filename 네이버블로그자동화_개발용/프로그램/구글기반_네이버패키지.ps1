@@ -256,6 +256,7 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
                     [string]$previousHeading.type -eq 'InsertStandaloneHeading' -and [int]$previousHeading.level -eq 2) {
                     $previousSpacer.purpose = 'ParentHeadingToSubheading'
                     $previousSpacer.heightPx = [int]$Formatting.ParentHeadingToSubheadingPx
+                    $previousSpacer.mobileHeightPx = [int]$Formatting.MobileParentHeadingToSubheadingPx
                     $previousSpacer.naverFontSizePx = 12
                     $previousSpacer.naverLineHeightPercent = 100
                     $previousSpacer.postcondition.measuredHeightPx = [int]$Formatting.ParentHeadingToSubheadingPx
@@ -281,12 +282,12 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertStandaloneHeading'; level=$level
                 text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
-                fontSizePx=$fontSize; bold=$true; textColor=$textColor; underline=$underline; underlineOffsetPx=$underlineOffset; underlineThicknessPx=$underlineThickness; underlineColor=$underlineColor; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; alignment='left'
+                fontSizePx=$fontSize; bold=$true; textColor=$textColor; underline=$underline; underlineOffsetPx=$underlineOffset; underlineThicknessPx=$underlineThickness; underlineColor=$underlineColor; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; mobileLineHeightPx=$(if ($level -eq 2) { [int]$Formatting.MobileSectionHeadingLineHeightPx } else { [int]$Formatting.MobileSubheadingLineHeightPx }); alignment='left'
                 postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
             })
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'; headingLevel=$level
-                heightPx=$bottomPx; naverFontSizePx=$bottomNativeFontPx; naverLineHeightPercent=$bottomNativeLineHeightPercent
+                heightPx=$bottomPx; mobileHeightPx=$(if ($level -eq 3) { [int]$Formatting.MobileSubheadingBottomPx } else { $bottomPx }); naverFontSizePx=$bottomNativeFontPx; naverLineHeightPercent=$bottomNativeLineHeightPercent
                 postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$bottomPx; tolerancePx=0.5 }
             })
             continue
@@ -677,6 +678,11 @@ $plan = [pscustomobject]@{
         subheadingTopPx = [int]$config.EditorFormatting.SubheadingTopPx
         subheadingBottomPx = [int]$config.EditorFormatting.SubheadingBottomPx
         parentToSubheadingPx = [int]$config.EditorFormatting.ParentHeadingToSubheadingPx
+        mobileParentToSubheadingPx = [int]$config.EditorFormatting.MobileParentHeadingToSubheadingPx
+        mobileSubheadingBottomPx = [int]$config.EditorFormatting.MobileSubheadingBottomPx
+        mobileSectionLineHeightPx = [int]$config.EditorFormatting.MobileSectionHeadingLineHeightPx
+        mobileSubheadingLineHeightPx = [int]$config.EditorFormatting.MobileSubheadingLineHeightPx
+        wrappedLineHeightTolerancePx = [int]$config.EditorFormatting.MobileWrappedHeadingLineHeightTolerancePx
     }
     stopPoint = 'BeforePublicationSettings'
     publicationSettingsOpened = $false

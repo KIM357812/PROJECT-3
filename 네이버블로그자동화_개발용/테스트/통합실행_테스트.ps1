@@ -59,14 +59,18 @@ try {
     $mode=@{
         horizontalOverflow=$false
         headingSpacingVerified=$true
+        headingLineHeightVerified=$true
         imageFileNames=@('01.jpg','02.jpg')
         imageServerUrls=@('https://blogfiles.pstatic.net/a/01.jpg','https://blogfiles.pstatic.net/a/02.jpg')
         rawUrlVisible=$false
     }
     $pc=@{}+$mode
+    $pc.previewMode='desktop'
     $pc.sourceLinks=@(@{text='원문';href='https://example.com/article'})
-    @{schemaVersion=1;measurementSource='RenderedNaverDomAndScreen';pc=$pc;mobile=$mode;secondPass=@{
-        wholeArticleFromStart=$true;titleVerified=$true;bodyVerified=$true;headingsVerified=$true;headingSpacingVerified=$true;imagesVerified=$true;linksVerified=$true
+    $mobile=@{}+$mode
+    $mobile.previewMode='mobile'
+    @{schemaVersion=1;measurementSource='RenderedNaverDomAndScreen';pc=$pc;mobile=$mobile;secondPass=@{
+        wholeArticleFromStart=$true;titleVerified=$true;bodyVerified=$true;headingsVerified=$true;headingSpacingVerified=$true;headingLineHeightVerified=$true;imagesVerified=$true;linksVerified=$true
     }} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $measurementPath -Encoding UTF8
     $r=[pscustomobject]@{runId='test';status='Verified';reason='';publicationSettingsOpened=$false;published=$false;editorUrl='https://blog.naver.com/ij1128?Redirect=Write&'}
     foreach($n in @('imagesGenerated','imagesOptimized','imagesUploaded','titleVerified','bodyVerified','linksVerified','tagsVerified','formatVerified','mobileVerified','secondPassVerified')){$r|Add-Member $n $true}

@@ -59,7 +59,7 @@ try {
     $headingActions = @($plan.actions | Where-Object type -eq 'InsertStandaloneHeading')
     Assert-True ($headingActions.Count -eq 3) 'H2·H3 독립 소제목 동작 수'
     Assert-True ($plan.headingInsertionMode -eq 'StandaloneParagraphWithMeasuredSpacers') '독립 소제목 삽입 모드'
-    Assert-True ([bool]$plan.mobileHeadingSpacing.required -and $plan.mobileHeadingSpacing.sectionTopPx -eq 32 -and $plan.mobileHeadingSpacing.sectionBottomPx -eq 21 -and $plan.mobileHeadingSpacing.subheadingTopPx -eq 24 -and $plan.mobileHeadingSpacing.subheadingBottomPx -eq 12 -and $plan.mobileHeadingSpacing.dominancePx -eq 6) 'PC와 모바일 동일 소제목 간격 계층 검증 기준'
+    Assert-True ([bool]$plan.mobileHeadingSpacing.required -and $plan.mobileHeadingSpacing.sectionTopPx -eq 32 -and $plan.mobileHeadingSpacing.sectionBottomPx -eq 21 -and $plan.mobileHeadingSpacing.subheadingTopPx -eq 24 -and $plan.mobileHeadingSpacing.subheadingBottomPx -eq 12 -and $plan.mobileHeadingSpacing.mobileParentToSubheadingPx -eq 8 -and $plan.mobileHeadingSpacing.mobileSubheadingBottomPx -eq 8 -and $plan.mobileHeadingSpacing.mobileSectionLineHeightPx -eq 23 -and $plan.mobileHeadingSpacing.mobileSubheadingLineHeightPx -eq 22) 'PC 기준 유지와 모바일 전용 소제목 간격·줄높이 기준'
     foreach ($headingAction in $headingActions) {
         $position = [array]::IndexOf(@($plan.actions), $headingAction)
         Assert-True ($position -gt 0 -and $position -lt (@($plan.actions).Count - 1)) '소제목 앞뒤 동작 존재'
@@ -78,7 +78,9 @@ try {
         if($afterHeading.type -eq 'InsertVerticalSpacer' -and $afterHeading.purpose -eq 'HeadingBottom'){
             $expectedBottomNative = if($headingAction.level -eq 2){@(13,160)}else{@(12,100)}
             Assert-True ($afterHeading.naverFontSizePx -eq $expectedBottomNative[0] -and $afterHeading.naverLineHeightPercent -eq $expectedBottomNative[1]) "H$($headingAction.level) 모바일 아래 간격 네이티브 표현"
+            if($headingAction.level -eq 3){ Assert-True ($afterHeading.mobileHeightPx -eq 8) 'H3 모바일 아래 간격 8px' }
         }
+        Assert-True (($headingAction.level -eq 2 -and $headingAction.mobileLineHeightPx -eq 23) -or ($headingAction.level -eq 3 -and $headingAction.mobileLineHeightPx -eq 22)) '모바일 여러 줄 소제목 줄높이'
         Assert-True (($headingAction.level -eq 2 -and $headingAction.fontSizePx -eq 19 -and -not [bool]$headingAction.underline -and $headingAction.textColor -eq '#4A78E0') -or ($headingAction.level -eq 3 -and $headingAction.fontSizePx -eq 16 -and -not [bool]$headingAction.underline -and $headingAction.textColor -eq '#111111')) 'H2/H3 크기·색상·밑줄 없음 계층'
         Assert-True ([bool]$headingAction.postcondition.requireStandaloneParagraph) '소제목 독립 문단 사후조건'
         Assert-True ([bool]$headingAction.postcondition.forbidMergedPreviousText -and [bool]$headingAction.postcondition.forbidMergedNextText) '소제목 앞뒤 본문 합침 금지'
@@ -126,7 +128,7 @@ try {
     Assert-True ($blockText -match 'text-align\s*:\s*justify' -and $blockText -match 'text-align-last\s*:\s*left') '본문 오른쪽 끝 양쪽 정렬과 마지막 줄 왼쪽 정렬'
     $promptPath = Join-Path $root '구글기반\프롬프트\02_최종_글쓰기_프롬프트.md'
     $promptText = Get-Content -LiteralPath $promptPath -Raw -Encoding UTF8
-    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','최소 6px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 없음','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 외곽선','첫 번째 이미지에만 네이버 `대표` 지정')) {
+    foreach ($requiredPromptRule in @('InsertStandaloneHeading','InsertVerticalSpacer','PasteStandaloneParagraphBlock','H2는 19px','H3는 16px','각각 8px','줄높이 23px','H3는 22px','문단 뒤 18px','PasteRenderedSegment','data-reader-term','제목 바로 아래 이미지','밑줄 없음','표-다음 H2 30px 이하','참고자료-관련 글 6px','1px 연회색 외곽선','첫 번째 이미지에만 네이버 `대표` 지정')) {
         Assert-True ($promptText.Contains($requiredPromptRule)) "네이버 프롬프트 구조 규칙: $requiredPromptRule"
     }
     Assert-True ($promptText -match '(?i)text-align:\s*justify\s*;\s*text-align-last:\s*left') '프롬프트 본문 양쪽 정렬과 마지막 줄 왼쪽 정렬'
