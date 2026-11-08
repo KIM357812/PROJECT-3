@@ -62,6 +62,13 @@ export function extractHtmlBodyFragment(html){
 export function assertNewPostSafety(url,blogId){
   if(!isAuthorizedNaverUrl(url,blogId,{allowWrite:true})) throw new Error('UNSAFE_EDITOR_URL');
 }
+export function assertExistingPrivatePostEditorSafety(url,blogId,logNo){
+  let u;try{u=new URL(url)}catch{throw new Error('UNSAFE_EXISTING_EDITOR_URL')}
+  const safe=u.protocol==='https:'&&u.hostname==='blog.naver.com'&&
+    /PostUpdateForm\.naver$/i.test(u.pathname)&&u.searchParams.get('blogId')===String(blogId)&&
+    u.searchParams.get('logNo')===String(logNo)&&/^\d+$/.test(String(logNo));
+  if(!safe)throw new Error('UNSAFE_EXISTING_EDITOR_URL');
+}
 export function validatePlannedImagePaths(plan,manifest){
   const actions=[...(plan.actions??[])].filter(x=>x.type==='UploadImageAtAnchor').sort((a,b)=>Number(a.documentOrder)-Number(b.documentOrder));
   const assets=[...(manifest.assets??[])].sort((a,b)=>Number(a.order)-Number(b.order));
@@ -87,7 +94,12 @@ export function previewClassFor(mode){
   throw new Error(`INVALID_PREVIEW_MODE:${mode}`);
 }
 function escapeHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function normalizeText(s){return String(s??'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim()}
+function normalizeText(s){return String(s??'').replace(/[\u00a0\u2060]/g,' ').replace(/\s+/g,' ').trim()}
+function protectFinalHangulWord(text){
+  const value=String(text??'');const match=/([가-힣]{3,})$/.exec(value);
+  if(!match)return value;
+  return value.slice(0,-match[1].length)+[...match[1]].join('\u2060');
+}
 function cssRgbFromHex(value){
   const match=/^#([0-9a-f]{6})$/i.exec(String(value||''));
   if(!match)return String(value||'').toLowerCase();
@@ -237,7 +249,7 @@ async function dismissRecoveryDialog(cdp,sessionId,contextId){
   await waitFor(cdp,sessionId,`!document.body.innerText.replace(/\\s+/g,'').includes('작성중인글이있습니다')`,{contextId,timeout:5000});
   return true;
 }
-async function nativePaste(cdp,targetId,sessionId,contextId,selector,mode,payload,runDir,name,{selectAll=false,skipClick=false}={}){
+async function nativePaste(cdp,targetId,sessionId,contextId,selector,mode,payload,runDir,name,{selectAll=false,selectAllCount=1,skipClick=false}={}){
   const encoded=JSON.stringify(selector);
   const metrics=await waitFor(cdp,sessionId,`(()=>{const e=document.querySelector(${encoded});if(!e)return null;e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();return r.width>0&&r.height>0?{x:r.x+Math.min(12,r.width/2),y:r.y+Math.min(12,r.height/2),width:innerWidth,height:innerHeight,scale:devicePixelRatio}:null})()`,{contextId});
   const payloadPath=path.join(runDir,`.native-${name}.${mode==='Html'?'html':'txt'}`);
@@ -246,21 +258,104 @@ async function nativePaste(cdp,targetId,sessionId,contextId,selector,mode,payloa
   const helper=path.join(path.dirname(fileURLToPath(import.meta.url)),'크롬네이티브입력.ps1');
   const bounds=await getTargetWindowBounds(cdp,targetId);
   const args=['-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',helper,'-ViewportX',String(metrics.x),'-ViewportY',String(metrics.y),'-ViewportWidth',String(metrics.width),'-ViewportHeight',String(metrics.height),'-DeviceScaleFactor',String(metrics.scale),'-ExpectedLeft',String(bounds.left),'-ExpectedTop',String(bounds.top),'-ExpectedWidth',String(bounds.width),'-ExpectedHeight',String(bounds.height),'-Mode',mode,'-PayloadPath',payloadPath];
-  if(selectAll)args.push('-SelectAll');
+  if(selectAll)args.push('-SelectAll','-SelectAllCount',String(selectAllCount));
   if(skipClick)args.push('-SkipClick');
   const output=execFileSync('powershell.exe',args,{stdio:['ignore','pipe','pipe'],windowsHide:true,encoding:'utf8'});
   fs.appendFileSync(path.join(runDir,'native-input.log'),`${name}\t${output.trim()}\n`,'utf8');
   return metrics;
 }
-async function nativeSelectExactParagraph(cdp,targetId,sessionId,contextId,text,runDir,name){
+async function frameOffsetForContext(cdp,attached,contextId){
+  const frameId=attached.contexts.get(contextId)?.auxData?.frameId;
+  if(!frameId)return {x:0,y:0};
+  try{
+    const owner=await cdp.send('DOM.getFrameOwner',{frameId},attached.sessionId);
+    const model=await cdp.send('DOM.getBoxModel',{backendNodeId:owner.backendNodeId},attached.sessionId);
+    const quad=model?.model?.content||model?.model?.border;
+    return quad?.length>=8?{x:Math.min(quad[0],quad[2],quad[4],quad[6]),y:Math.min(quad[1],quad[3],quad[5],quad[7])}:{x:0,y:0};
+  }catch{return {x:0,y:0}}
+}
+async function nativeSelectExactParagraph(cdp,targetId,attached,contextId,text,runDir,name){
+  const sessionId=attached.sessionId;
   const expected=JSON.stringify(normalizeText(text));
-  const metrics=await waitFor(cdp,sessionId,`(()=>{const normalize=s=>String(s||'').replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim();const matches=[...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].filter(p=>normalize(p.textContent)===${expected});if(matches.length!==1)return null;const e=matches[0];e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();return r.width>0&&r.height>0?{x:r.x+Math.min(12,r.width/2),y:r.y+Math.min(12,r.height/2),width:innerWidth,height:innerHeight,scale:devicePixelRatio}:null})()`,{contextId});
-  const payloadPath=path.join(runDir,`.native-${name}.txt`);fs.writeFileSync(payloadPath,'','utf8');
-  const helper=path.join(path.dirname(fileURLToPath(import.meta.url)),'크롬네이티브입력.ps1');
-  const bounds=await getTargetWindowBounds(cdp,targetId);
-  const args=['-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',helper,'-ViewportX',String(metrics.x),'-ViewportY',String(metrics.y),'-ViewportWidth',String(metrics.width),'-ViewportHeight',String(metrics.height),'-DeviceScaleFactor',String(metrics.scale),'-ExpectedLeft',String(bounds.left),'-ExpectedTop',String(bounds.top),'-ExpectedWidth',String(bounds.width),'-ExpectedHeight',String(bounds.height),'-Mode','Click','-PayloadPath',payloadPath];
-  const output=execFileSync('powershell.exe',args,{stdio:['ignore','pipe','pipe'],windowsHide:true,encoding:'utf8'});
-  fs.appendFileSync(path.join(runDir,'native-input.log'),`${name}\t${output.trim()}\n`,'utf8');
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27},sessionId).catch(()=>{});
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27},sessionId).catch(()=>{});
+  await waitFor(cdp,sessionId,`(()=>{const normalize=s=>String(s||'').replace(/[\\u00a0\\u2060]/g,' ').replace(/\\s+/g,' ').trim();const matches=[...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].filter(p=>normalize(p.textContent)===${expected});if(matches.length!==1)return false;matches[0].scrollIntoView({block:'center',inline:'center'});return true})()`,{contextId,timeout:5000});
+  await sleep(700);
+  for(let attempt=0;attempt<8;attempt++){
+    const visibility=await evaluate(cdp,sessionId,`(()=>{const normalize=s=>String(s||'').replace(/[\\u00a0\\u2060]/g,' ').replace(/\\s+/g,' ').trim();const e=[...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].find(p=>normalize(p.textContent)===${expected});if(!e)return null;const r=e.getBoundingClientRect();return{top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight}})()`,contextId);
+    if(!visibility)throw new Error(`HEADING_VISIBILITY_NOT_FOUND:${normalizeText(text)}`);
+    if(visibility.top>=140&&visibility.bottom<=visibility.height-70)break;
+    const deltaY=visibility.top<140?Math.min(-120,visibility.top-220):Math.max(120,visibility.bottom-(visibility.height-180));
+    await cdp.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:Math.max(1,Math.min(visibility.width-2,visibility.width/2)),y:Math.max(1,Math.min(visibility.height-2,visibility.height/2)),deltaX:0,deltaY},sessionId);
+    await sleep(180);
+  }
+  const remote=await cdp.send('Runtime.evaluate',{expression:`(()=>{const normalize=s=>String(s||'').replace(/[\\u00a0\\u2060]/g,' ').replace(/\\s+/g,' ').trim();return [...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].find(p=>normalize(p.textContent)===${expected})})()`,contextId,returnByValue:false,userGesture:true},sessionId);
+  const objectId=remote.result?.objectId;if(!objectId)throw new Error(`HEADING_REMOTE_OBJECT_NOT_FOUND:${normalizeText(text)}`);
+  const quads=await cdp.send('DOM.getContentQuads',{objectId},sessionId);
+  const quad=quads.quads?.[0];if(!quad?.length)throw new Error(`HEADING_CONTENT_QUAD_NOT_FOUND:${normalizeText(text)}`);
+  const point={x:Math.min(quad[0],quad[2],quad[4],quad[6])+Math.min(12,(Math.max(quad[0],quad[2],quad[4],quad[6])-Math.min(quad[0],quad[2],quad[4],quad[6]))/2),y:(Math.min(quad[1],quad[3],quad[5],quad[7])+Math.max(quad[1],quad[3],quad[5],quad[7]))/2};
+  fs.mkdirSync(runDir,{recursive:true});
+  fs.appendFileSync(path.join(runDir,'heading-coordinate-debug.jsonl'),`${JSON.stringify({name,text,quad,point,deviceScaleFactor:await evaluate(cdp,sessionId,'devicePixelRatio',contextId)})}\n`,'utf8');
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',...point},sessionId);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1},sessionId);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1},sessionId);
+  await waitFor(cdp,sessionId,`(()=>{const normalize=s=>String(s||'').replace(/[\\u00a0\\u2060]/g,' ').replace(/\\s+/g,' ').trim();const matches=[...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].filter(p=>normalize(p.textContent)===${expected});if(matches.length!==1)return false;const e=matches[0];e.focus();const range=document.createRange();range.selectNodeContents(e);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange',{bubbles:true}));return selection.toString().replace(/[\\u00a0\\u2060]/g,' ').replace(/\\s+/g,' ').trim()===${expected}})()`,{contextId,timeout:5000});
+  await sleep(250);
+}
+async function findVisibleControlContext(cdp,attached,selector,timeout=7000){
+  const end=Date.now()+timeout;const encoded=JSON.stringify(selector);
+  while(Date.now()<end){
+    const contextIds=[undefined,...[...attached.contexts].sort((a,b)=>a[0]-b[0]).map(([id])=>id)];
+    for(const contextId of contextIds){
+      try{if(await evaluate(cdp,attached.sessionId,`(()=>{const e=document.querySelector(${encoded});return !!(e&&e.offsetParent)})()`,contextId))return contextId}catch{}
+    }
+    await sleep(200);
+  }
+  const diagnostics=[];
+  const contextIds=[undefined,...[...attached.contexts].sort((a,b)=>a[0]-b[0]).map(([id])=>id)];
+  for(const contextId of contextIds){
+    try{
+      const controls=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('[class*="toolbar"],[class*="format"],[class*="line-height"],button,[role="button"]')].filter(e=>e.offsetParent).map(e=>({tag:e.tagName,class:String(e.className||''),text:(e.textContent||'').replace(/\\s+/g,' ').trim(),title:e.getAttribute('title')||'',aria:e.getAttribute('aria-label')||''})).filter(x=>/서식|소제목|줄간격|toolbar|format|line-height/i.test([x.class,x.text,x.title,x.aria].join(' '))).slice(0,80)`,contextId);
+      if(controls?.length)diagnostics.push({contextId,controls});
+    }catch{}
+  }
+  throw new Error(`VISIBLE_CONTROL_CONTEXT_NOT_FOUND:${selector}:${JSON.stringify(diagnostics)}`);
+}
+async function nativeSelectAdjacentBlankParagraph(cdp,attached,contextId,headingText,{collapse=true}={}){
+  const expected=JSON.stringify(normalizeText(headingText));
+  return waitFor(cdp,attached.sessionId,`(()=>{const norm=s=>String(s||'').replace(/[\\u00a0\\u200b\\u2060]/g,' ').replace(/\\s+/g,' ').trim();const paragraphs=[...document.querySelectorAll('.se-component:not(.se-documentTitle) p.se-text-paragraph')].filter(p=>!p.closest('.se-caption'));const heading=paragraphs.find(p=>norm(p.textContent)===${expected});if(!heading)return null;const p=paragraphs[paragraphs.indexOf(heading)+1];if(!p||norm(p.textContent)!=='')return null;p.scrollIntoView({block:'center',inline:'center'});p.focus();const range=document.createRange();range.selectNodeContents(p);range.collapse(${collapse?'true':'false'});const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange',{bubbles:true}));const r=p.getBoundingClientRect();return{found:true,x:r.x+Math.min(12,r.width/2),y:r.y+Math.max(2,Math.min(8,r.height/2))}})()`,{contextId,timeout:5000});
+}
+async function applyMobileHeadingSpacing(cdp,targetId,attached,contextId,plan,runDir){
+  const headings=[...(plan.actions??[])].filter(a=>a.type==='InsertStandaloneHeading').sort((a,b)=>a.order-b.order);
+  let compactedSpacerCount=0,wrappedHeadingCount=0;
+  for(const [index,heading] of headings.entries()){
+    await nativeSelectExactParagraph(cdp,targetId,attached,contextId,heading.text,runDir,`heading-${index+1}-select`);
+    const toolbarContext=await findVisibleControlContext(cdp,attached,'.se-text-format-toolbar-button');
+    if(Number(heading.level)===2){
+      await clickVisible(cdp,attached.sessionId,toolbarContext,'.se-line-height-toolbar-button');
+      await clickVisible(cdp,attached.sessionId,toolbarContext,'.se-toolbar-option-line-height-150-button');
+      wrappedHeadingCount++;
+    }
+    const spacer=await nativeSelectAdjacentBlankParagraph(cdp,attached,contextId,heading.text).catch(()=>null);
+    if(spacer){
+      // 완전히 빈 문단은 네이버 모바일이 기본 본문 높이로 강제한다. 화면에
+      // 보이지 않는 word-joiner를 실제 편집 입력으로 넣어 11px 서식을 보존한다.
+      await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:spacer.x,y:spacer.y},attached.sessionId);
+      await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:spacer.x,y:spacer.y,button:'left',clickCount:1},attached.sessionId);
+      await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:spacer.x,y:spacer.y,button:'left',clickCount:1},attached.sessionId);
+      await cdp.send('Input.insertText',{text:'\u2060'},attached.sessionId);
+      await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16,modifiers:8},attached.sessionId);
+      await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37,modifiers:8},attached.sessionId);
+      await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37,modifiers:8},attached.sessionId);
+      await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16},attached.sessionId);
+      await clickVisible(cdp,attached.sessionId,toolbarContext,'.se-font-size-code-toolbar-button');
+      await clickVisible(cdp,attached.sessionId,toolbarContext,'.se-toolbar-option-font-size-code-fs11-button');
+      await clickVisible(cdp,attached.sessionId,toolbarContext,'.se-line-height-toolbar-button');
+      await clickVisible(cdp,attached.sessionId,toolbarContext,'.se-toolbar-option-line-height-150-button');
+      compactedSpacerCount++;
+    }
+  }
+  return {headingCount:headings.length,wrappedHeadingCount,compactedSpacerCount};
 }
 async function clickVisible(cdp,sessionId,contextId,selector){
   const encoded=JSON.stringify(selector);
@@ -389,16 +484,22 @@ async function uploadImageAtAnchor(cdp,targetId,attached,contextId,action,runDir
     await cdp.send('Page.setInterceptFileChooserDialog',{enabled:false},attached.sessionId).catch(()=>{});
   }
 }
-async function prepareEditor(cdp,targetId,attached,contextId,plan){
-  assertNewPostSafety(await currentUrl(cdp,attached.sessionId),plan.blogId);
+async function prepareEditor(cdp,targetId,attached,contextId,plan,{existingLogNo=''}={}){
+  const editorUrl=await currentUrl(cdp,attached.sessionId);
+  if(existingLogNo)assertExistingPrivatePostEditorSafety(editorUrl,plan.blogId,existingLogNo);
+  else assertNewPostSafety(editorUrl,plan.blogId);
   const title=JSON.stringify(plan.title);
   await nativePaste(cdp,targetId,attached.sessionId,contextId,'.se-documentTitle .se-text-paragraph','Text',plan.title,plan.runDir,'title',{selectAll:true});
   await waitFor(cdp,attached.sessionId,`document.querySelector('.se-documentTitle .se-text-paragraph')?.textContent.replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim()===${title}`,{contextId,timeout:5000});
   const bodySelector='.se-component:not(.se-documentTitle) .se-section-text .se-text-paragraph';
   const units=buildInsertionUnits(plan);
-  await nativePaste(cdp,targetId,attached.sessionId,contextId,bodySelector,'Html',units.map(unit=>unit.html).join('\n'),plan.runDir,'body-all',{selectAll:true});
+  await nativePaste(cdp,targetId,attached.sessionId,contextId,bodySelector,'Html',units.map(unit=>unit.html).join('\n'),plan.runDir,'body-all',{selectAll:true,selectAllCount:2});
   for(const unit of units){
-    if(unit.verifyText){const expected=JSON.stringify(normalizeText(unit.verifyText));await waitFor(cdp,attached.sessionId,`[...document.querySelectorAll('p')].filter(p=>p.textContent.replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim()===${expected}).length===1`,{contextId,timeout:5000})}
+    if(unit.verifyText){
+      const expected=JSON.stringify(normalizeText(unit.verifyText));
+      try{await waitFor(cdp,attached.sessionId,`[...document.querySelectorAll('p')].filter(p=>p.textContent.replace(/\\u00a0/g,' ').replace(/\\s+/g,' ').trim()===${expected}).length===1`,{contextId,timeout:5000})}
+      catch{throw new Error(`UNIT_VERIFICATION_FAILED:${unit.kind}:${normalizeText(unit.verifyText)}`)}
+    }
   }
   const uploads=[...plan.actions].filter(a=>a.type==='UploadImageAtAnchor').sort((a,b)=>a.order-b.order);
   const uploadedImages=[];
@@ -470,7 +571,7 @@ async function inspectEditableDom(cdp,attached){
   }
   return rows;
 }
-async function capture(cdp,sessionId,file){const r=await cdp.send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);fs.writeFileSync(file,Buffer.from(r.data,'base64'))}
+async function capture(cdp,sessionId,file){const r=await cdp.send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,Buffer.from(r.data,'base64'))}
 
 async function main(){
   const a=parseArgs(process.argv.slice(2));
@@ -505,6 +606,42 @@ async function main(){
       atomicWrite(a.result,{status:'Verified',editorUrl,tagsVerified:evidence.tags.length===plan.tags.length,observedTags:evidence.tags,publicationSettingsOpened:true,visibilityChanged:false,scheduleChanged:false,publishButtonClicked:false,published:false});
       return;
     }
+    if(a.mode==='repair-mobile-headings'){
+      const existingLogNo=String(a['existing-log-no']||'').trim();
+      if(!/^\d+$/.test(existingLogNo))throw new Error('INVALID_EXISTING_LOG_NO');
+      const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
+      const updateUrl=`https://blog.naver.com/PostUpdateForm.naver?blogId=${encodeURIComponent(a['blog-id'])}&logNo=${encodeURIComponent(existingLogNo)}`;
+      let editorTarget=a['target-id']?targets.find(t=>t.targetId===a['target-id']):null;
+      if(editorTarget)assertExistingPrivatePostEditorSafety(editorTarget.url,a['blog-id'],existingLogNo);
+      else{const created=await cdp.send('Target.createTarget',{url:updateUrl,newWindow:false});editorTarget={targetId:created.targetId,url:updateUrl,type:'page'}}
+      await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
+      const attached=await attach(cdp,editorTarget.targetId);const context=await findEditorContext(cdp,attached);
+      assertExistingPrivatePostEditorSafety(await currentUrl(cdp,attached.sessionId),a['blog-id'],existingLogNo);
+      const titleBefore=await evaluate(cdp,attached.sessionId,`document.querySelector('.se-documentTitle .se-text-paragraph')?.textContent.trim()||''`,context.contextId);
+      const imageSourcesBefore=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('img.se-image-resource')].map((i,n)=>i.closest('.se-component')?.getAttribute('data-compid')||String(n))`,context.contextId);
+      const bodyTextBefore=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('.se-main-container p.se-text-paragraph')].map(p=>p.textContent||'').join('\\n')`,context.contextId);
+      await setEditorPreviewMode(cdp,attached,'desktop');
+      const mobileRepair=await applyMobileHeadingSpacing(cdp,editorTarget.targetId,attached,context.contextId,plan,a['run-dir']);
+      await cleanEditorView(cdp,attached,context.contextId);
+      const pcPreview=await setEditorPreviewMode(cdp,attached,'desktop');const pcObserved=await inspectEditor(cdp,attached,context.contextId,plan,'pc');
+      const pcScreenshot=path.join(a['run-dir'],'pc-mobile-repair.png');await capture(cdp,attached.sessionId,pcScreenshot);
+      const mobilePreview=await setEditorPreviewMode(cdp,attached,'mobile');const mobileObserved=await inspectEditor(cdp,attached,context.contextId,plan,'mobile');
+      const mobileScreenshot=path.join(a['run-dir'],'mobile-repair.png');await capture(cdp,attached.sessionId,mobileScreenshot);
+      await setEditorPreviewMode(cdp,attached,'desktop');
+      const titleAfter=await evaluate(cdp,attached.sessionId,`document.querySelector('.se-documentTitle .se-text-paragraph')?.textContent.trim()||''`,context.contextId);
+      const imageSourcesAfter=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('img.se-image-resource')].map((i,n)=>i.closest('.se-component')?.getAttribute('data-compid')||String(n))`,context.contextId);
+      const bodyTextAfter=await evaluate(cdp,attached.sessionId,`[...document.querySelectorAll('.se-main-container p.se-text-paragraph')].map(p=>p.textContent||'').join('\\n')`,context.contextId);
+      const semanticText=s=>normalizeText(String(s||'').replace(/[\u200b\u2060]/g,''));
+      const stableImage=s=>{try{return decodeURIComponent(new URL(String(s||'')).pathname.split('/').at(-1)||'')}catch{return String(s||'').replace(/\?.*$/,'')}};
+      const contentPreserved=titleBefore===titleAfter&&semanticText(bodyTextBefore)===semanticText(bodyTextAfter)&&JSON.stringify(imageSourcesBefore.map(stableImage))===JSON.stringify(imageSourcesAfter.map(stableImage));
+      const headingsVerified=pcObserved.headingsVerified&&mobileObserved.headingsVerified&&pcObserved.hierarchyVerified&&mobileObserved.hierarchyVerified;
+      const mobileLineHeightVerified=mobileObserved.headingLineHeightVerified;
+      const verified=contentPreserved&&mobileRepair.headingCount>0&&mobileRepair.compactedSpacerCount>0&&headingsVerified&&mobileLineHeightVerified&&mobileObserved.headingSpacingVerified;
+      const measurementFile=path.join(a['run-dir'],'mobile-repair-measurement.json');
+      atomicWrite(measurementFile,{schemaVersion:1,mode:'ExistingPrivatePostMobileHeadingRepair',blogId:a['blog-id'],logNo:existingLogNo,titlePreserved:titleBefore===titleAfter,bodyTextPreserved:semanticText(bodyTextBefore)===semanticText(bodyTextAfter),imageSourcesPreserved:JSON.stringify(imageSourcesBefore.map(stableImage))===JSON.stringify(imageSourcesAfter.map(stableImage)),mobileRepair,pc:{previewMode:pcPreview.mode,headingDetails:pcObserved.body?.headingDetails||[]},mobile:{previewMode:mobilePreview.mode,headingDetails:mobileObserved.body?.headingDetails||[],headingSpacingVerified:mobileObserved.headingSpacingVerified,headingLineHeightVerified:mobileLineHeightVerified},publicationSettingsOpened:false,published:false});
+      atomicWrite(a.result,{status:verified?'Verified':'Blocked',reason:verified?'MOBILE_HEADING_REPAIR_VERIFIED':'MOBILE_HEADING_REPAIR_VERIFICATION_FAILED',editorUrl:updateUrl,targetId:editorTarget.targetId,contentPreserved,mobileRepair,headingsVerified,mobileHeadingSpacingVerified:mobileObserved.headingSpacingVerified,mobileLineHeightVerified,pcScreenshot,mobileScreenshot,measurementFile,publicationSettingsOpened:false,publishButtonClicked:false,published:false});
+      return;
+    }
     if(a.mode==='publish-private'){
       if(a['confirm-private-publish']!=='true'){atomicWrite(a.result,{status:'Blocked',reason:'EXPLICIT_PRIVATE_PUBLISH_CONFIRMATION_REQUIRED',published:false});return}
       const editorTarget=a['target-id']?targets.find(t=>t.targetId===a['target-id']):targets.find(t=>isAuthorizedNaverUrl(t.url,a['blog-id'],{allowWrite:true}));
@@ -512,7 +649,9 @@ async function main(){
       const attached=await attach(cdp,editorTarget.targetId);
       const editorContext=await findEditorContext(cdp,attached,10000);
       const editorUrl=await currentUrl(cdp,attached.sessionId);
-      assertNewPostSafety(editorUrl,a['blog-id']);
+      const existingLogNo=String(a['existing-log-no']||'').trim();
+      if(existingLogNo)assertExistingPrivatePostEditorSafety(editorUrl,a['blog-id'],existingLogNo);
+      else assertNewPostSafety(editorUrl,a['blog-id']);
       const content=await evaluate(cdp,attached.sessionId,`(()=>({title:(document.querySelector('.se-documentTitle [contenteditable="true"],.se-title-text[contenteditable="true"],.se-documentTitle .se-text-paragraph')?.textContent||'').trim(),body:(document.querySelector('.se-main-container,article')?.innerText||'').trim(),images:document.querySelectorAll('img.se-image-resource').length}))()`,editorContext.contextId);
       if(!content?.title||!content?.body||content.images<1){atomicWrite(a.result,{status:'Blocked',reason:'EDITOR_CONTENT_INCOMPLETE',published:false,content});return}
       let publication=null;
@@ -525,17 +664,17 @@ async function main(){
       if(!selectedState.openType){atomicWrite(a.result,{status:'Blocked',reason:'PRIVATE_VISIBILITY_NOT_VERIFIED',published:false,selectedState});return}
       await clickVisible(cdp,attached.sessionId,publication.contextId,'button[data-testid="seOnePublishBtn"]');
       let publishedUrl='';
-      const deadline=Date.now()+20000;
+       const deadline=Date.now()+60000;
       while(Date.now()<deadline&&!publishedUrl){
         const currentTargets=(await cdp.send('Target.getTargets')).targetInfos.filter(t=>t.type==='page');
-        const candidate=currentTargets.find(t=>{try{const u=new URL(t.url),parts=u.pathname.split('/').filter(Boolean);return u.protocol==='https:'&&u.hostname==='blog.naver.com'&&((parts[0]===a['blog-id']&&/^\\d+$/.test(parts[1]||''))||(u.pathname==='/PostView.naver'&&u.searchParams.get('blogId')===a['blog-id']&&/^\\d+$/.test(u.searchParams.get('logNo')||'')))}catch{return false}});
+         const candidate=currentTargets.find(t=>{try{const u=new URL(t.url),parts=u.pathname.split('/').filter(Boolean);const found=(parts[0]===a['blog-id']&&/^\\d+$/.test(parts[1]||''))?parts[1]:(u.pathname==='/PostView.naver'&&u.searchParams.get('blogId')===a['blog-id']&&/^\\d+$/.test(u.searchParams.get('logNo')||''))?u.searchParams.get('logNo'):'';return u.protocol==='https:'&&u.hostname==='blog.naver.com'&&!!found&&(!existingLogNo||found===existingLogNo)}catch{return false}});
         if(candidate)publishedUrl=candidate.url;else await sleep(500);
       }
       if(!publishedUrl){
         const current=await currentUrl(cdp,attached.sessionId).catch(()=> '');
-        if(new RegExp(`^https://blog\\.naver\\.com/${a['blog-id']}/\\d+`).test(current))publishedUrl=current;
+         try{const u=new URL(current),parts=u.pathname.split('/').filter(Boolean);const found=(parts[0]===a['blog-id']&&/^\\d+$/.test(parts[1]||''))?parts[1]:(u.pathname==='/PostView.naver'&&u.searchParams.get('blogId')===a['blog-id'])?u.searchParams.get('logNo')||'':'';if(found&&(!existingLogNo||found===existingLogNo))publishedUrl=current}catch{}
       }
-      atomicWrite(a.result,publishedUrl?{status:'Published',visibility:'private',published:true,editorUrl,publishedUrl,title:content.title,imageCount:content.images}:{status:'Failed',reason:'PRIVATE_PUBLISH_RESULT_NOT_VERIFIED',published:false,editorUrl,selectedState});
+       atomicWrite(a.result,publishedUrl?{status:existingLogNo?'Updated':'Published',visibility:'private',published:true,editorUrl,publishedUrl,logNo:existingLogNo||null,title:content.title,imageCount:content.images}:{status:'Failed',reason:'PRIVATE_PUBLISH_RESULT_NOT_VERIFIED',published:false,editorUrl,selectedState});
       return;
     }
     if(a.mode==='inspect'){
@@ -552,6 +691,7 @@ async function main(){
         await sleep(500);
         if(a['select-paragraph']==='true'&&paragraphRect){await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:paragraphRect.x,y:paragraphRect.y},attached.sessionId);await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:paragraphRect.x,y:paragraphRect.y,button:'left',clickCount:1},attached.sessionId);await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:paragraphRect.x,y:paragraphRect.y,button:'left',clickCount:1},attached.sessionId);await sleep(500)}
         if(a['open-line-height']==='true'){await clickVisible(cdp,attached.sessionId,editorContext.contextId,'button.se-line-height-toolbar-button');await sleep(400)}
+        if(a['open-font-size']==='true'){await clickVisible(cdp,attached.sessionId,editorContext.contextId,'button.se-font-size-code-toolbar-button');await sleep(400)}
         if(a['open-text-format']==='true'){await clickVisible(cdp,attached.sessionId,editorContext.contextId,'button.se-text-format-toolbar-button');await sleep(400)}
       }
       if(a['open-publication-settings']){
@@ -582,10 +722,28 @@ async function main(){
     const pkg=readJson(a.package);const plan=readJson(pkg.editorPlan);const imageManifest=readJson(pkg.imageManifest);validatePlannedImagePaths(plan,imageManifest);plan.blogId=a['blog-id'];plan.runDir=a['run-dir'];
     const missingImages=plan.actions.filter(x=>x.type==='UploadImageAtAnchor'&&!fs.existsSync(x.path)).map(x=>x.path);
     if(missingImages.length){atomicWrite(a.result,{status:'Blocked',reason:'IMAGE_FILES_REQUIRED',missingImages,publicationSettingsOpened:false,published:false});return}
-    const editorSelection=await getOrCreateAutomationEditorTarget(cdp,targets,a['write-url'],a['blog-id'],a['target-id']||'');
+    const existingLogNo=String(a['existing-log-no']||'').trim();
+    let editorSelection;
+    if(existingLogNo){
+      if(!/^\d+$/.test(existingLogNo))throw new Error('INVALID_EXISTING_LOG_NO');
+      const updateUrl=`https://blog.naver.com/PostUpdateForm.naver?blogId=${encodeURIComponent(a['blog-id'])}&logNo=${encodeURIComponent(existingLogNo)}`;
+      const preferred=a['target-id']&&targets.find(t=>t.targetId===a['target-id']);
+      if(preferred){
+        assertExistingPrivatePostEditorSafety(preferred.url,a['blog-id'],existingLogNo);
+        editorSelection={target:preferred,reused:true,preferred:true};
+      }else{
+        const created=await cdp.send('Target.createTarget',{url:updateUrl,newWindow:false});
+        editorSelection={target:{targetId:created.targetId,url:updateUrl,type:'page'},reused:false,existingPrivatePost:true};
+      }
+    }else editorSelection=await getOrCreateAutomationEditorTarget(cdp,targets,a['write-url'],a['blog-id'],a['target-id']||'');
     const editorTarget=editorSelection.target;
     await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
     const attached=await attach(cdp,editorTarget.targetId);
+    if(existingLogNo){
+      const updateUrl=`https://blog.naver.com/PostUpdateForm.naver?blogId=${encodeURIComponent(a['blog-id'])}&logNo=${encodeURIComponent(existingLogNo)}`;
+      await cdp.send('Page.navigate',{url:updateUrl},attached.sessionId);
+      await sleep(1500);
+    }
     let context;
     try{context=await findEditorContext(cdp,attached)}catch(e){
       const outer=await currentUrl(cdp,attached.sessionId).catch(()=> '');
@@ -594,13 +752,15 @@ async function main(){
     }
     const outer=await currentUrl(cdp,attached.sessionId);
     if(/nid\.naver\.com/.test(outer)){if(!editorSelection.reused)await cdp.send('Target.closeTarget',{targetId:editorTarget.targetId}).catch(()=>{});atomicWrite(a.result,{status:'Blocked',reason:'NAVER_LOGIN_REQUIRED',publicationSettingsOpened:false,published:false});return}
-    assertNewPostSafety(outer,a['blog-id']);
+    if(existingLogNo)assertExistingPrivatePostEditorSafety(outer,a['blog-id'],existingLogNo);
+    else assertNewPostSafety(outer,a['blog-id']);
     await evaluate(cdp,attached.sessionId,`window.name='NTE_AUTOMATION_EDITOR';true`).catch(()=>{});
     await dismissRecoveryDialog(cdp,attached.sessionId,context.contextId);
     await setEditorPreviewMode(cdp,attached,'desktop');
     await cdp.send('Target.activateTarget',{targetId:editorTarget.targetId});
     await sleep(600);
-    const prepared=await prepareEditor(cdp,editorTarget.targetId,attached,context.contextId,plan);
+    const prepared=await prepareEditor(cdp,editorTarget.targetId,attached,context.contextId,plan,{existingLogNo});
+    prepared.mobileHeadingRepair=await applyMobileHeadingSpacing(cdp,editorTarget.targetId,attached,context.contextId,plan,plan.runDir);
     const stabilizedServerImages=await inspectImagesSequentially(cdp,attached,context.contextId,prepared.imageUploadCount);
     await cleanEditorView(cdp,attached,context.contextId);
     const pcPreview=await setEditorPreviewMode(cdp,attached,'desktop');

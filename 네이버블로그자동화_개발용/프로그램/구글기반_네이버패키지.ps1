@@ -273,9 +273,10 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
                 }
             }
             if (-not $parentAdjacent -and -not $tableAdjacent) {
+                $mobileTopPx = if ($level -eq 2) { [int]$Formatting.MobileSectionHeadingTopPx } else { [int]$Formatting.MobileSubheadingTopPx }
                 $Actions.Add([pscustomobject]@{
                     order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingTop'; headingLevel=$level
-                    heightPx=$topPx; naverFontSizePx=$topNativeFontPx; naverLineHeightPercent=$topNativeLineHeightPercent
+                    heightPx=$topPx; mobileHeightPx=$mobileTopPx; naverFontSizePx=$topNativeFontPx; naverLineHeightPercent=$topNativeLineHeightPercent
                     postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$topPx }
                 })
             }
@@ -283,11 +284,13 @@ function Add-AtomicSegmentActions([object]$Actions, [ref]$Order, [object]$Segmen
                 order=$Order.Value++; type='InsertStandaloneHeading'; level=$level
                 text=(ConvertFrom-HtmlText $heading.Groups['text'].Value); fontFamily=[string]$Formatting.HeadingFontFamily
                 fontSizePx=$fontSize; bold=$true; textColor=$textColor; underline=$underline; underlineOffsetPx=$underlineOffset; underlineThicknessPx=$underlineThickness; underlineColor=$underlineColor; resetInlineFormattingBefore=$true; lineHeightPx=[int]$Formatting.BodyLineHeightPx; mobileLineHeightPx=$(if ($level -eq 2) { [int]$Formatting.MobileSectionHeadingLineHeightPx } else { [int]$Formatting.MobileSubheadingLineHeightPx }); alignment='left'
-                postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily }
+                preventMobileSingleCharacterOrphan=$true
+                postcondition=[pscustomobject]@{ requireStandaloneParagraph=$true; forbidMergedPreviousText=$true; forbidMergedNextText=$true; requireNativeFontFamily=[string]$Formatting.HeadingFontFamily; rejectMobileSingleCharacterLastLine=$true }
             })
+            $mobileBottomPx = if ($level -eq 2) { [int]$Formatting.MobileSectionHeadingBottomPx } else { [int]$Formatting.MobileSubheadingBottomPx }
             $Actions.Add([pscustomobject]@{
                 order=$Order.Value++; type='InsertVerticalSpacer'; purpose='HeadingBottom'; headingLevel=$level
-                heightPx=$bottomPx; mobileHeightPx=$(if ($level -eq 3) { [int]$Formatting.MobileSubheadingBottomPx } else { $bottomPx }); naverFontSizePx=$bottomNativeFontPx; naverLineHeightPercent=$bottomNativeLineHeightPercent
+                heightPx=$bottomPx; mobileHeightPx=$mobileBottomPx; naverFontSizePx=$bottomNativeFontPx; naverLineHeightPercent=$bottomNativeLineHeightPercent
                 postcondition=[pscustomobject]@{ requireStandaloneBlankParagraph=$true; measuredHeightPx=$bottomPx; tolerancePx=0.5 }
             })
             continue
@@ -677,6 +680,9 @@ $plan = [pscustomobject]@{
         sectionBottomPx = [int]$config.EditorFormatting.SectionHeadingBottomPx
         subheadingTopPx = [int]$config.EditorFormatting.SubheadingTopPx
         subheadingBottomPx = [int]$config.EditorFormatting.SubheadingBottomPx
+        mobileSectionTopPx = [int]$config.EditorFormatting.MobileSectionHeadingTopPx
+        mobileSectionBottomPx = [int]$config.EditorFormatting.MobileSectionHeadingBottomPx
+        mobileSubheadingTopPx = [int]$config.EditorFormatting.MobileSubheadingTopPx
         parentToSubheadingPx = [int]$config.EditorFormatting.ParentHeadingToSubheadingPx
         mobileParentToSubheadingPx = [int]$config.EditorFormatting.MobileParentHeadingToSubheadingPx
         mobileSubheadingBottomPx = [int]$config.EditorFormatting.MobileSubheadingBottomPx
@@ -693,6 +699,21 @@ $plan | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $planPath -Encoding 
 $executionContractPath = Join-Path $outputRoot '네이버편집실행계약.json'
 $executionContract = New-ComputerUseExecutionContract -Plan $plan
 $executionContract | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $executionContractPath -Encoding UTF8
+$executionPackagePath = Join-Path $outputRoot '실행패키지.json'
+[pscustomobject]@{
+    outputRoot = $outputRoot
+    draft = $draftPath
+    imageManifest = $imageManifestPath
+    editorPlan = $planPath
+    executionContract = $executionContractPath
+    executionStatus = 'NotExecuted'
+    completionClaimAllowed = $false
+    title = [string]$job.RecommendedTitle
+    tagCount = $tags.Count
+    segmentCount = $segments.Count
+    imageCount = $promptSections.Count
+    stopPoint = 'BeforePublicationSettings'
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $executionPackagePath -Encoding UTF8
 
 foreach ($name in $requiredFiles) {
     $after = Get-FileFingerprint (Join-Path $sourceFull $name)
@@ -708,6 +729,7 @@ foreach ($name in $requiredFiles) {
     imageManifest = $imageManifestPath
     editorPlan = $planPath
     executionContract = $executionContractPath
+    executionPackage = $executionPackagePath
     executionStatus = 'NotExecuted'
     completionClaimAllowed = $false
     title = [string]$job.RecommendedTitle

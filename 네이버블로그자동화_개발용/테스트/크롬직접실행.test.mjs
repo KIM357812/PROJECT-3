@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths,chooseEditorTargetAction,buildHeadingSpecs,previewClassFor} from '../프로그램/크롬직접실행.mjs';
+import {parseArgs,isAuthorizedNaverUrl,assertNewPostSafety,assertExistingPrivatePostEditorSafety,buildInsertionUnits,extractHtmlBodyFragment,verifyNaverAuthCookies,validatePlannedImagePaths,chooseEditorTargetAction,buildHeadingSpecs,previewClassFor} from '../프로그램/크롬직접실행.mjs';
 
 test('argument parser keeps Korean and spaced paths as values',()=>{
   assert.deepEqual(parseArgs(['--mode','execute','--package','C:\\한글 폴더\\실행패키지.json']),{mode:'execute',package:'C:\\한글 폴더\\실행패키지.json'});
@@ -13,6 +13,11 @@ test('only the configured Naver blog and a new editor are accepted',()=>{
   assert.equal(isAuthorizedNaverUrl('https://blog.naver.com/ij1128?Redirect=Write&','ij1128',{allowWrite:true}),true);
   assert.equal(isAuthorizedNaverUrl('https://blog.naver.com/PostWriteForm.naver?blogId=ij1128&logNo=123','ij1128',{allowWrite:true}),false);
   assert.throws(()=>assertNewPostSafety('https://blog.naver.com/ij1128/2244','ij1128'),/UNSAFE_EDITOR_URL/);
+});
+test('existing private-post upgrade safety is exact to owner and log number',()=>{
+  assert.doesNotThrow(()=>assertExistingPrivatePostEditorSafety('https://blog.naver.com/PostUpdateForm.naver?blogId=ij1128&logNo=224469188866','ij1128','224469188866'));
+  assert.throws(()=>assertExistingPrivatePostEditorSafety('https://blog.naver.com/PostUpdateForm.naver?blogId=ij1128&logNo=999','ij1128','224469188866'),/UNSAFE_EXISTING_EDITOR_URL/);
+  assert.throws(()=>assertExistingPrivatePostEditorSafety('https://blog.naver.com/PostUpdateForm.naver?blogId=other&logNo=224469188866','ij1128','224469188866'),/UNSAFE_EXISTING_EDITOR_URL/);
 });
 test('plan becomes atomic units and never merges headings with body',()=>{
   const plan={actions:[
@@ -38,18 +43,18 @@ test('mobile heading specs keep PC values and apply narrower mobile-only child g
   const plan={mobileHeadingSpacing:{tolerancePx:4,dominancePx:6},actions:[
     {order:1,type:'PasteStandaloneParagraphBlock'},
     {order:2,type:'InsertVerticalSpacer',heightPx:32,mobileHeightPx:32},
-    {order:3,type:'InsertStandaloneHeading',text:'큰 소제목',level:2,fontSizePx:19,lineHeightPx:27,mobileLineHeightPx:23,textColor:'#4A78E0'},
-    {order:4,type:'InsertVerticalSpacer',heightPx:12,mobileHeightPx:8},
+    {order:3,type:'InsertStandaloneHeading',text:'큰 소제목',level:2,fontSizePx:19,lineHeightPx:27,mobileLineHeightPx:22,textColor:'#4A78E0'},
+    {order:4,type:'InsertVerticalSpacer',heightPx:12,mobileHeightPx:10},
     {order:5,type:'PasteStandaloneParagraphBlock'},
     {order:6,type:'InsertVerticalSpacer',heightPx:24,mobileHeightPx:24},
-    {order:7,type:'InsertStandaloneHeading',text:'작은 소제목',level:3,fontSizePx:16,lineHeightPx:27,mobileLineHeightPx:22,textColor:'#111111'},
+    {order:7,type:'InsertStandaloneHeading',text:'작은 소제목',level:3,fontSizePx:16,lineHeightPx:27,mobileLineHeightPx:20,textColor:'#111111'},
     {order:8,type:'InsertVerticalSpacer',heightPx:12,mobileHeightPx:8},
     {order:9,type:'PasteStandaloneParagraphBlock'}
   ]};
   const pc=buildHeadingSpecs(plan,'pc');
   const mobile=buildHeadingSpecs(plan,'mobile');
   assert.deepEqual(pc.map(s=>[s.level,s.expectedTopPx,s.expectedBottomPx,s.lineHeightPx]),[[2,32,12,27],[3,24,12,27]]);
-  assert.deepEqual(mobile.map(s=>[s.level,s.expectedTopPx,s.expectedBottomPx,s.mobileLineHeightPx,s.requireGapDominance]),[[2,32,8,23,true],[3,24,8,22,true]]);
+  assert.deepEqual(mobile.map(s=>[s.level,s.expectedTopPx,s.expectedBottomPx,s.mobileLineHeightPx,s.requireGapDominance]),[[2,32,10,22,true],[3,24,8,20,true]]);
 });
 test('clipboard unit keeps only body fragment and never leaks HTML title',()=>{
   const fragment=extractHtmlBodyFragment('<!doctype html><html><head><title>네이버 독립 입력 블록 9</title></head><body><p>실제 본문</p><script>bad()</script></body></html>');

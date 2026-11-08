@@ -4,6 +4,8 @@ param(
     [string]$PackagePath,
     [Parameter(Mandatory=$true)][string]$RunDirectory,
     [string]$TargetId,
+    [string]$ExistingLogNo,
+    [switch]$RepairExistingPrivateMobile,
     [switch]$ConnectionTestOnly,
     [switch]$AllowTagOnlyPublicationSettings
 )
@@ -66,8 +68,14 @@ if(-not(Test-DevTools $port)){
 $node=(Get-Command node -ErrorAction Stop).Source
 $runner=Join-Path $PSScriptRoot '크롬직접실행.mjs'
 $resultPath=Join-Path $RunDirectory $(if($ConnectionTestOnly){'browser-preflight.json'}else{'result.json'})
-$args=@($runner,'--mode',$(if($ConnectionTestOnly){'preflight'}else{'execute'}),'--port',[string]$port,'--package',$(if($PackagePath){$PackagePath}else{'-'}),'--run-dir',$RunDirectory,'--result',$resultPath,'--blog-id',[string]$config.Naver.BlogId,'--blog-url',[string]$config.Naver.BlogUrl,'--write-url',[string]$config.Naver.WriteUrl)
+$runnerMode=if($ConnectionTestOnly){'preflight'}elseif($RepairExistingPrivateMobile){'repair-mobile-headings'}else{'execute'}
+$args=@($runner,'--mode',$runnerMode,'--port',[string]$port,'--package',$(if($PackagePath){$PackagePath}else{'-'}),'--run-dir',$RunDirectory,'--result',$resultPath,'--blog-id',[string]$config.Naver.BlogId,'--blog-url',[string]$config.Naver.BlogUrl,'--write-url',[string]$config.Naver.WriteUrl)
 if(-not[string]::IsNullOrWhiteSpace($TargetId)){$args+=@('--target-id',$TargetId)}
+if(-not[string]::IsNullOrWhiteSpace($ExistingLogNo)){
+    if($ExistingLogNo -notmatch '^\d+$'){throw 'INVALID_EXISTING_LOG_NO'}
+    $args+=@('--existing-log-no',$ExistingLogNo)
+}
+if($RepairExistingPrivateMobile -and [string]::IsNullOrWhiteSpace($ExistingLogNo)){throw 'EXISTING_LOG_NO_REQUIRED_FOR_MOBILE_REPAIR'}
 if($AllowTagOnlyPublicationSettings){$args+=@('--allow-tag-only-publication-settings','true')}
 $attemptLog=@()
 for($attempt=1;$attempt -le $retryCount;$attempt++){

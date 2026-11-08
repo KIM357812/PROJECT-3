@@ -13,6 +13,7 @@ param(
     [Parameter(Mandatory=$true)][ValidateSet('Text','Html','Click')][string]$Mode,
     [Parameter(Mandatory=$true)][string]$PayloadPath,
     [switch]$SelectAll,
+    [ValidateRange(1,3)][int]$SelectAllCount=1,
     [switch]$SkipClick
 )
 $ErrorActionPreference='Stop'
@@ -131,7 +132,7 @@ if(-not $SkipClick){
     }
 }
 if($SelectAll){
-    [Windows.Forms.SendKeys]::SendWait('^a')
+    1..$SelectAllCount|ForEach-Object {[Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 80}
     [Windows.Forms.SendKeys]::SendWait('{BACKSPACE}')
 }
 

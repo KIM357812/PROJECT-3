@@ -1,7 +1,13 @@
 // The host supplies the documented Chrome-tab APIs. No page-script mutations.
 export function createEditorRunner(domTab, nativeTab) {
   const frame = domTab.playwright.frameLocator('#mainFrame');
-  const clean = s => s.replace(/[\u200b\ufeff]/g,'').replace(/\s+/g,' ').trim();
+  const clean = s => s.replace(/[\u200b\u2060\ufeff]/g,'').replace(/\s+/g,' ').trim();
+  const protectLastHangulWord = text => {
+    const match=String(text).match(/([가-힣]{3,})$/);
+    if(!match) return text;
+    const protectedWord=[...match[1]].join('\u2060');
+    return text.slice(0,-match[1].length)+protectedWord;
+  };
   async function paragraph(text) {
     const rows = await frame.locator('p').evaluateAll(ps => ps.map(p=>({id:p.id,text:p.textContent})));
     const found = rows.filter(p=>clean(p.text)===clean(text));
@@ -56,12 +62,17 @@ export function createEditorRunner(domTab, nativeTab) {
       // component first, then explicitly restore the approved 19/16px size.
       // Once isolated as a section-title component, Ctrl+A is scoped to that
       // component and reliably selects every text run (including wrapped text).
+      if(action.preventMobileSingleCharacterOrphan) {
+        await nativeTab.paste(null,protectLastHangulWord(action.text),{format:'text'});
+        await nativeTab.getAXState({emit:false});
+      }
       await button('문단 서식 변경'); await button('소제목');
       await select(action.text);
       await nativeTab.pressKey(null,'ctrl+a');
       await nativeTab.getAXState({emit:false});
       await size(action.fontSizePx===17?16:action.fontSizePx);
       if(await frame.getByRole('button',{name:'굵기 적용',exact:true}).count()) await button('굵기 적용');
+      await button('줄간격 열기'); await button(String(action.mobileLineHeightPercent||120)+'%');
     } else if(action.action==='ApplyMixedCalloutParagraphByExactText') {
       if(await frame.getByRole('banner').getByRole('button',{name:'굵기 해제',exact:true}).count()) await button('굵기 해제');
       // Replace only the selected paragraph, preserving its surrounding callout.

@@ -121,6 +121,11 @@ foreach ($heading in $headings) {
         selectionMode='NativeTripleClickRenderedParagraph'; mutationMode='SetStateNotToggle'
         scrollMode='CenterVisibleOutsideFixedToolbar'; forbidAccessibilitySelectText=$true
         bold=$true; alignment='left'; topPx=32; bottomPx=21; requireStandaloneParagraph=$true
+        mobileFontSizePx=[int]$heading.fontSizePx
+        mobileLineHeightPercent=$(if ([int]$heading.fontSizePx -eq 19) { 120 } else { 120 })
+        mobileTopPx=$(if ([int]$heading.fontSizePx -eq 19) { 24 } else { 18 })
+        mobileBottomPx=$(if ([int]$heading.fontSizePx -eq 19) { 10 } else { 8 })
+        preventMobileSingleCharacterOrphan=$true
         postcondition=[pscustomobject]@{
             paragraphStyle='소제목'; nativeComponentClass='se-sectionTitle'
             requireNativeSectionTitleComponent=$true
@@ -129,6 +134,7 @@ foreach ($heading in $headings) {
             requiredFontFamilyClass='se-ff-system'; expectedBoldElementCount=1
             computedFontSizePx=[int]$heading.fontSizePx
             minimumGapDifferencePx=6; requireGapBeforeGreaterThanAfter=$true
+            rejectMobileSingleCharacterLastLine=$true
             requireEveryTextRunFontSize=$true; rejectInheritedFontSize=$true
         }
     })
