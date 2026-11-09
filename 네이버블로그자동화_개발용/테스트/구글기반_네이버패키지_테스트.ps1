@@ -24,9 +24,12 @@ try {
     Set-Content -LiteralPath (Join-Path $source '이미지_프롬프트.txt') -Value ($prompts -join "`n`n") -Encoding UTF8
     [pscustomobject]@{ RecommendedTitle='시험 제목'; Site='POWER Magazine'; Url='https://example.com/article'; Title='원문 제목' } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source '작업정보.json') -Encoding UTF8
+    $postListPath = Join-Path $temporaryRoot 'naver-posts.json'
+    @([pscustomobject]@{Title='시험 제목 관련 분석';Url='https://blog.naver.com/ij1128/1';Published=(Get-Date).AddDays(-1).ToString('o');Labels=@('AI','기술동향');Content='시험 제목 관련 핵심 내용';RelatedUrls=@()}) |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $postListPath -Encoding UTF8
     $before = Get-ChildItem -LiteralPath $source -File | Sort-Object Name | Get-FileHash -Algorithm SHA256
 
-    $result = & $scriptPath -SourceArticlePath $source -WorkRoot $work -ContentId 'NTE-TEST-001' | ConvertFrom-Json
+    $result = & $scriptPath -SourceArticlePath $source -WorkRoot $work -ContentId 'NTE-TEST-001' -ExistingPostListPath $postListPath | ConvertFrom-Json
     Assert-True ($result.segmentCount -eq 5) '이미지 사이 입력 구간 5개'
     Assert-True ($result.imageCount -eq 4) 'Google 기준 이미지 4개'
     Assert-True ($result.tagCount -ge 5 -and $result.tagCount -le 10) '네이버 태그 5~10개'

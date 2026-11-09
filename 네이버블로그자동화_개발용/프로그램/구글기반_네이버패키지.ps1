@@ -9,13 +9,16 @@ param(
 
     [string]$ContentId = ('NTE-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
 
-    [string]$ConfigPath = ''
+    [string]$ConfigPath = '',
+
+    [string]$ExistingPostListPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $projectRoot '네이버통합설정.json' }
 $imagePreparePath = Join-Path $PSScriptRoot '이미지작업준비.ps1'
+$relatedPostPath = Join-Path $PSScriptRoot '관련글선정.ps1'
 $requiredFiles = @(
     'Blogger에_붙여넣을_본문.html',
     '메타데이터.txt',
@@ -548,6 +551,7 @@ foreach ($name in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Google 글 필수 파일을 찾을 수 없습니다: $name" }
 }
 if (-not (Test-Path -LiteralPath $imagePreparePath -PathType Leaf)) { throw '기존 네이버 이미지 준비 기능을 찾을 수 없습니다.' }
+if (-not (Test-Path -LiteralPath $relatedPostPath -PathType Leaf)) { throw '네이버 관련 글 선정 기능을 찾을 수 없습니다.' }
 
 $sourceFingerprint = @{}
 foreach ($name in $requiredFiles) { $sourceFingerprint[$name] = Get-FileFingerprint (Join-Path $sourceFull $name) }
@@ -569,14 +573,19 @@ foreach ($name in $requiredFiles) {
 }
 
 $html = [IO.File]::ReadAllText((Join-Path $sourceFull 'Blogger에_붙여넣을_본문.html'), [Text.Encoding]::UTF8)
-$html = Apply-NaverReaderTermRules -Html $html
-$html = Normalize-NaverImagePlacement -Html $html
-Assert-NaverReaderTerms -Html $html -Formatting $config.EditorFormatting
 $metadata = [IO.File]::ReadAllText((Join-Path $sourceFull '메타데이터.txt'), [Text.Encoding]::UTF8)
 $imagePromptText = [IO.File]::ReadAllText((Join-Path $sourceFull '이미지_프롬프트.txt'), [Text.Encoding]::UTF8)
 $job = Get-Content -LiteralPath (Join-Path $sourceFull '작업정보.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$promptSections = @(Get-ImagePromptSections $imagePromptText)
 $tags = @(Get-Tags $metadata)
+. $relatedPostPath
+$postListPath = if ($ExistingPostListPath) { $ExistingPostListPath } elseif ($env:NAVER_RELATED_POSTS_PATH) { [string]$env:NAVER_RELATED_POSTS_PATH } else { '' }
+$publicPosts = @(Get-NaverPublicPosts -BlogId ([string]$config.Naver.BlogId) -Maximum 150 -PostListPath $postListPath -DetailLookbackDays ([int]$config.RelatedPosts.LookbackDays))
+$relatedPosts = @(Select-NaverRelatedPosts -CurrentTitle ([string]$job.RecommendedTitle) -CurrentSummary (ConvertFrom-HtmlText $html) -CurrentLabels $tags -ScheduledAt ([DateTimeOffset]::Now) -Posts $publicPosts -BlogId ([string]$config.Naver.BlogId) -LookbackDays ([int]$config.RelatedPosts.LookbackDays) -Maximum ([int]$config.RelatedPosts.MaximumCount) -TitleMatchPoints ([int]$config.RelatedPosts.TitleMatchPoints) -LabelMatchPoints ([int]$config.RelatedPosts.LabelMatchPoints) -BodyMatchPoints ([int]$config.RelatedPosts.BodyMatchPoints) -MaximumBodyMatches ([int]$config.RelatedPosts.MaximumBodyMatches) -RepeatPenaltyPoints ([int]$config.RelatedPosts.RepeatPenaltyPoints) -MaximumRepeatPenalty ([int]$config.RelatedPosts.MaximumRepeatPenalty) -ReplacementMinimumScore ([int]$config.RelatedPosts.ReplacementMinimumScore) -ReplacementMinimumRatio ([double]$config.RelatedPosts.ReplacementMinimumRatio))
+$html = Set-NaverRelatedPostsHtml -Html $html -RelatedPosts $relatedPosts
+$html = Apply-NaverReaderTermRules -Html $html
+$html = Normalize-NaverImagePlacement -Html $html
+Assert-NaverReaderTerms -Html $html -Formatting $config.EditorFormatting
+$promptSections = @(Get-ImagePromptSections $imagePromptText)
 if ($tags.Count -lt [int]$config.Naver.MinimumTags) {
     $fallbackTags = @('인공지능','글로벌기술동향','미래기술','데이터센터','에너지전환')
     foreach ($tag in $fallbackTags) { if ($tags.Count -lt [int]$config.Naver.MinimumTags -and $tags -notcontains $tag) { $tags += $tag } }

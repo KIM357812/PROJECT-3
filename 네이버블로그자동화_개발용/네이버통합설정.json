@@ -31,6 +31,21 @@
       "DoNotEnforceUnofficialLengthOrImageCounts": true
     }
   },
+  "RelatedPosts": {
+    "Enabled": true,
+    "LookbackDays": 60,
+    "MaximumCount": 3,
+    "TitleMatchPoints": 10,
+    "LabelMatchPoints": 6,
+    "BodyMatchPoints": 2,
+    "MaximumBodyMatches": 5,
+    "RepeatPenaltyPoints": 3,
+    "MaximumRepeatPenalty": 12,
+    "ReplacementMinimumScore": 10,
+    "ReplacementMinimumRatio": 0.6,
+    "OmitWhenLookupFails": true,
+    "PreserveExistingHtmlDesign": true
+  },
   "ImageAutomation": {
     "Enabled": true,
     "TargetCount": 4,
