@@ -33,4 +33,11 @@ $threw = $false
 try { Assert-ResponsiveTableDataLabels $outsideWrapper } catch { $threw = $_.Exception.Message -match '모바일 세로형 변환 영역' }
 Assert-True $threw '데이터 표가 반응형 영역 밖에 있으면 실패해야 함'
 
+$styleHtml = '<div data-blog-sources="true" style="background:#fff; border-left:4px solid red; padding:1px; color:#222"><p>출처</p></div><div data-blog-related="true" style="background:#fff"><p>관련 글</p></div>'
+$styleRepaired = Repair-NaverDeterministicStyles $styleHtml
+Assert-True ($styleRepaired -match 'data-blog-sources="true"[^>]*background-color:\s*#f8f9fa') '출처 배경을 확정 회색으로 자동 교정해야 함'
+Assert-True ($styleRepaired -match 'data-blog-sources="true"[^>]*padding:\s*8px 12px') '출처 여백을 자동 교정해야 함'
+Assert-True ($styleRepaired -notmatch 'border-left') '출처 왼쪽 장식선을 제거해야 함'
+Assert-True ($styleRepaired -match 'data-blog-related="true"[^>]*background-color:\s*#eef3fb') '관련 글 배경을 확정 파란색으로 자동 교정해야 함'
+
 Write-Output 'Responsive table repair tests passed.'

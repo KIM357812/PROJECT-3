@@ -1,4 +1,4 @@
-﻿param([switch]$NoWatcher,[switch]$CandidatePreview,[switch]$CachedOnly,[string]$SearchResponsePath,[switch]$AutoStart,[switch]$ImageStatusOnly,[switch]$PreflightOnly,[switch]$RetryLatest)
+﻿param([switch]$NoWatcher,[switch]$CandidatePreview,[switch]$CachedOnly,[string]$SearchResponsePath,[switch]$AutoStart,[switch]$ImageStatusOnly,[switch]$PreflightOnly,[switch]$RetryLatest,[string]$RetryStatePath='')
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '공통.ps1')
 . (Join-Path $PSScriptRoot '후보준비.ps1')
@@ -91,10 +91,11 @@ function Start-Workflow {
     }
 }
 
-function Retry-LatestRun {
+function Retry-LatestRun([string]$StatePath='') {
     Assert-ProgramEnvironment | Out-Null
-    $run=Get-LatestRetryableRun
+    $run=if($StatePath){Split-Path -Parent ([IO.Path]::GetFullPath($StatePath))}else{Get-LatestRetryableRun}
     if (-not $run) { Write-Host '재시도할 실패 작업이 없습니다.'; return }
+    if($StatePath -and -not(Test-Path -LiteralPath (Join-Path $run '작업상태.json') -PathType Leaf)){throw '지정한 실패 작업 상태를 찾을 수 없습니다.'}
     $state=Read-RunState $run
     $selected=@($state.Failed|Where-Object {$null -ne $_.Candidate}|ForEach-Object Candidate)
     if (-not $selected.Count) { Write-Host '글 작성 단계에서 재시도할 소재가 없습니다.'; return }
@@ -126,7 +127,7 @@ function Show-ImageStatus {
     }
 }
 
-if($PreflightOnly){Show-Preflight;return};if($ImageStatusOnly){Show-ImageStatus;return};if($RetryLatest){Retry-LatestRun;return};if($CandidatePreview -or $AutoStart){Start-Workflow;return}
+if($PreflightOnly){Show-Preflight;return};if($ImageStatusOnly){Show-ImageStatus;return};if($RetryLatest){Retry-LatestRun $RetryStatePath;return};if($CandidatePreview -or $AutoStart){Start-Workflow;return}
 if(-not $NoWatcher){$watcher=Join-Path $PSScriptRoot '이미지_감시.ps1';Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$watcher+'"')) -WindowStyle Hidden|Out-Null}
 Write-Host '블로그 통합 자동화';Write-Host '명령: 시작 / 재시도 / 이미지 / 점검 / 종료'
 while($true){$answer=Read-Host '명령';if($null -eq $answer){break};$command=$answer.Trim();switch($command){'시작'{Start-Workflow};'재시도'{Retry-LatestRun};'이미지'{Show-ImageStatus};'점검'{Show-Preflight};'종료'{break};default{Write-Host '시작, 재시도, 이미지, 점검, 종료 중 하나를 입력하세요.'}};if($command -eq '종료'){break}}

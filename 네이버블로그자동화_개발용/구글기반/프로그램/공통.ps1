@@ -343,11 +343,41 @@ function Assert-ResponsiveTableDataLabels([string]$html) {
     }
 }
 
+function Set-DataBlogDivStyle([string]$html,[string]$role,[hashtable]$required,[string[]]$remove=@()) {
+    $match = [regex]::Match($html,('(?is)<div\b(?=[^>]*\bdata-blog-{0}\s*=\s*["'']true["''])(?<attrs>[^>]*)>' -f [regex]::Escape($role)))
+    if (-not $match.Success) { return $html }
+    $attrs = $match.Groups['attrs'].Value
+    $styleMatch = [regex]::Match($attrs,'(?is)\bstyle\s*=\s*["''](?<value>[^"'']*)["'']')
+    $declarations = New-Object System.Collections.Generic.List[string]
+    $removeNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($remove) + @($required.Keys)) { [void]$removeNames.Add(([string]$name).Trim()) }
+    if ($styleMatch.Success) {
+        foreach ($part in @($styleMatch.Groups['value'].Value -split ';')) {
+            $item = $part.Trim()
+            if (-not $item -or $item -notmatch '^(?<name>[-a-zA-Z]+)\s*:') { continue }
+            if (-not $removeNames.Contains($Matches['name'])) { $declarations.Add($item) }
+        }
+    }
+    foreach ($name in @($required.Keys | Sort-Object)) { $declarations.Add(('{0}: {1}' -f $name,[string]$required[$name])) }
+    $newStyle = ($declarations -join '; ') + ';'
+    if ($styleMatch.Success) {
+        $attrs = $attrs.Substring(0,$styleMatch.Index) + ('style="' + $newStyle + '"') + $attrs.Substring($styleMatch.Index + $styleMatch.Length)
+    } else { $attrs += (' style="' + $newStyle + '"') }
+    $newTag = '<div' + $attrs + '>'
+    return $html.Substring(0,$match.Index) + $newTag + $html.Substring($match.Index + $match.Length)
+}
+
+function Repair-NaverDeterministicStyles([string]$html) {
+    $html = Set-DataBlogDivStyle $html 'sources' @{ 'background-color'='#f8f9fa'; 'padding'='8px 12px' } @('background','border-left')
+    $html = Set-DataBlogDivStyle $html 'related' @{ 'background-color'='#eef3fb' } @('background')
+    return $html
+}
+
 function Split-Article([string]$response, [string]$expectedSourceSite='', [string]$expectedSourceUrl='', [string[]]$allowedRelatedUrls=@()) {
     $normalized = $response.Trim().Replace("`r`n", "`n")
     $match = [regex]::Match($normalized, '\A```html\n(?<html>[\s\S]+?)\n```\n\n(?<meta>## 1\. SEO 키워드 분석[\s\S]+)\z')
     if (-not $match.Success) { throw 'HTML 코드 블록과 일반 Markdown 메타데이터가 정확히 분리되지 않았습니다.' }
-    $html = Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim()
+    $html = Repair-NaverDeterministicStyles (Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim())
     $allMeta = $match.Groups['meta'].Value.Trim()
     $expectedSourceSite = $expectedSourceSite.Trim()
     if (-not $expectedSourceSite) { throw '선택한 소재의 출처 사이트명이 없습니다.' }

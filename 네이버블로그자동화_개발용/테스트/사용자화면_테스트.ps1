@@ -10,6 +10,9 @@ $text = Get-Content -LiteralPath $uiScript -Raw -Encoding UTF8
 foreach ($required in @(
     '최근 7일 기사를 확인',
     '최신 기사로 새 글 만들기',
+    '실패한 글만 다시 작성',
+    '완성 글 편집기 입력 계속',
+    '기사 재검색이나 번호 재선택은 필요하지 않습니다',
     '준비된 글',
     '선택한 글 편집기에 넣기',
     '편집기입력완료.json',

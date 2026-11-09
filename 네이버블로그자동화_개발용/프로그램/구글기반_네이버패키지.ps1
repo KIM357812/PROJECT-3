@@ -710,6 +710,7 @@ $executionContract = New-ComputerUseExecutionContract -Plan $plan
 $executionContract | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $executionContractPath -Encoding UTF8
 $executionPackagePath = Join-Path $outputRoot '실행패키지.json'
 [pscustomobject]@{
+    sourceArticlePath = $sourceFull
     outputRoot = $outputRoot
     draft = $draftPath
     imageManifest = $imageManifestPath
@@ -733,6 +734,7 @@ foreach ($name in $requiredFiles) {
 }
 
 [pscustomobject]@{
+    sourceArticlePath = $sourceFull
     outputRoot = $outputRoot
     draft = $draftPath
     imageManifest = $imageManifestPath

@@ -15,7 +15,7 @@ if ($text -match 'NAVER_AUTOMATION_AUTO_SELECT_TOP') { throw '자동 추천 첫 
 if ($commonText -notmatch 'NAVER_AUTOMATION_RUNTIME_ROOT') { throw '실행 자료를 저장소 밖에 두는 설정이 없습니다.' }
 if ($startText -match 'NAVER_AUTOMATION_AUTO_SELECT_TOP|Select-Object\s+-First\s+\$autoSelectTop') { throw 'Google 기반 시작 흐름에 자동 선택이 남아 있습니다.' }
 if ($startText -notmatch 'Read-CandidateSelection') { throw 'PowerShell 사용자 기사 선택 연결이 없습니다.' }
-if ($text -notmatch 'Get-NaverGeneratedArticles' -or $text -notmatch 'selectedCount') { throw '1~3건 독립 패키지 생성 연결이 없습니다.' }
+if ($text -notmatch 'Get-NaverGenerationResult' -or $text -notmatch 'selectedCount' -or $text -notmatch 'PartiallyCompleted' -or $text -notmatch 'RetryLatest') { throw '1~3건 독립 패키지·부분 성공·실패 재시도 연결이 없습니다.' }
 if ($text -notmatch '작업대기_' -or $text -notmatch '실행패키지\.json') { throw '복수 글 작업 대기 또는 재개 자료 저장 연결이 없습니다.' }
 $candidatePrompt = Get-Content -LiteralPath (Join-Path $root '구글기반\프롬프트\01_소재_URL_프롬프트.md') -Raw -Encoding UTF8
 if ($candidatePrompt -match '20일|30일|7→20') { throw '최근 7일을 넘기는 후보 확장 규칙이 남아 있습니다.' }
