@@ -11,7 +11,20 @@
     "OpenPublicationSettings": false,
     "AllowPublicPublish": false,
     "AllowPrivatePublish": false,
-    "ModifyExistingPosts": false
+    "ModifyExistingPosts": true,
+    "DeleteExistingPosts": true,
+    "ModifyBlogSettings": true,
+    "ChangePublicationState": true,
+    "RequireExactTargetSelection": true,
+    "RequireOperatorConfirmation": true,
+    "RequireDeleteOrPublishReconfirmation": true
+  },
+  "GenerationPerformance": {
+    "MaximumParallelArticles": 2,
+    "ReuseRunContext": true,
+    "RetryFailedStageOnly": true,
+    "PreserveCompletedPackages": true,
+    "AutoRepairImageDerivatives": true
   },
   "Naver": {
     "BlogId": "ij1128",

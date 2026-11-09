@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$ManifestPath
+    [string]$ManifestPath,
+    [switch]$RepairMissing
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,7 +53,18 @@ foreach ($asset in $assets) {
     $sourceHashes[$sourceHash] = $true
     $outputPath = Join-Path ([string]$manifest.optimizedDirectory) ([string]$asset.outputFileName)
     if (Test-Path -LiteralPath $outputPath) {
-        throw "기존 변환 이미지를 덮어쓰지 않습니다: $outputPath"
+        if (-not $RepairMissing) { throw "기존 변환 이미지를 덮어쓰지 않습니다: $outputPath" }
+        $existingHash=(Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
+        $existing=$null
+        try{
+            $existing=[Drawing.Image]::FromFile($outputPath)
+            if($existing.Width -eq [int]$spec.width -and $existing.Height -eq [int]$spec.height -and
+               -not [string]::IsNullOrWhiteSpace([string]$asset.optimizedSha256) -and $existingHash -eq [string]$asset.optimizedSha256){
+                $results += [pscustomobject]@{role=[string]$asset.role;source=$sourcePath;output=$outputPath;width=$existing.Width;height=$existing.Height;quality='preserved';kilobytes=[Math]::Round((Get-Item -LiteralPath $outputPath).Length/1KB,1);sourceSha256=$sourceHash;optimizedSha256=$existingHash}
+                continue
+            }
+        }finally{if($null -ne $existing){$existing.Dispose()}}
+        Remove-Item -LiteralPath $outputPath -Force
     }
 
     $source = $null

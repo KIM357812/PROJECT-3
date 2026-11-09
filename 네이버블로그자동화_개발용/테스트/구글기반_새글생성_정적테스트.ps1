@@ -4,10 +4,12 @@ $root = Split-Path -Parent $PSScriptRoot
 $scriptPath = Join-Path $root '프로그램\구글기반_새글생성.ps1'
 $googleCommon = Join-Path $root '구글기반\프로그램\공통.ps1'
 $googleStart = Join-Path $root '구글기반\프로그램\시작.ps1'
+$parallelWorker = Join-Path $root '구글기반\프로그램\선택글_생성작업.ps1'
 $packagePath = Join-Path $root '프로그램\구글기반_네이버패키지.ps1'
 $text = Get-Content -LiteralPath $scriptPath -Raw -Encoding UTF8
 $commonText = Get-Content -LiteralPath $googleCommon -Raw -Encoding UTF8
 $startText = Get-Content -LiteralPath $googleStart -Raw -Encoding UTF8
+$workerText = Get-Content -LiteralPath $parallelWorker -Raw -Encoding UTF8
 $packageText = Get-Content -LiteralPath $packagePath -Raw -Encoding UTF8
 $candidatePreparationText = Get-Content -LiteralPath (Join-Path $root '구글기반\프로그램\후보준비.ps1') -Raw -Encoding UTF8
 if ($text -notmatch '구글기반_네이버패키지\.ps1') { throw 'Google 결과의 네이버 패키지 변환 연결이 없습니다.' }
@@ -15,6 +17,8 @@ if ($text -match 'NAVER_AUTOMATION_AUTO_SELECT_TOP') { throw '자동 추천 첫 
 if ($commonText -notmatch 'NAVER_AUTOMATION_RUNTIME_ROOT') { throw '실행 자료를 저장소 밖에 두는 설정이 없습니다.' }
 if ($startText -match 'NAVER_AUTOMATION_AUTO_SELECT_TOP|Select-Object\s+-First\s+\$autoSelectTop') { throw 'Google 기반 시작 흐름에 자동 선택이 남아 있습니다.' }
 if ($startText -notmatch 'Read-CandidateSelection') { throw 'PowerShell 사용자 기사 선택 연결이 없습니다.' }
+if ($startText -notmatch 'Start-Job\s+-FilePath\s+\$workerPath' -or $startText -notmatch '\$maximumParallel=2') { throw '선택 글 최대 2건 병렬 생성 연결이 없습니다.' }
+if ($startText -notmatch '공통실행자료' -or $workerText -notmatch 'Resolve-ArticleWithFactCheckRepair') { throw '실행 공통자료 재사용 또는 글별 단계 복구가 없습니다.' }
 if ($text -notmatch 'Get-NaverGenerationResult' -or $text -notmatch 'selectedCount' -or $text -notmatch 'PartiallyCompleted' -or $text -notmatch 'RetryLatest') { throw '1~3건 독립 패키지·부분 성공·실패 재시도 연결이 없습니다.' }
 if ($text -notmatch '작업대기_' -or $text -notmatch '실행패키지\.json') { throw '복수 글 작업 대기 또는 재개 자료 저장 연결이 없습니다.' }
 $candidatePrompt = Get-Content -LiteralPath (Join-Path $root '구글기반\프롬프트\01_소재_URL_프롬프트.md') -Raw -Encoding UTF8

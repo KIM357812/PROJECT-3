@@ -451,7 +451,8 @@ function New-ComputerUseExecutionContract([object]$Plan) {
             payload = $action
             precondition = [pscustomobject]@{
                 requireNewPostEditor = $true
-                forbidExistingPostEdit = $true
+                requireExactOperatorSelectedTarget = $true
+                forbidUnselectedPostEdit = $true
                 requireEditorBodyFocus = (@('ClearEditorBody','NormalizeBodyDefaults','InsertVerticalSpacer','InsertStandaloneHeading','PasteStandaloneParagraphBlock','PasteRenderedAtomicBlock','InsertImageAnchor','UploadImageAtAnchor') -contains [string]$action.type)
             }
             postcondition = [pscustomobject]@{
@@ -465,15 +466,20 @@ function New-ComputerUseExecutionContract([object]$Plan) {
         })
     }
     return [pscustomobject]@{
-        schemaVersion = 4
+        schemaVersion = 5
         contentId = [string]$Plan.contentId
-        executionMode = 'ComputerUseNewPostOnly'
+        executionMode = 'OperatorAuthorizedOperation'
+        requestedOperation = 'CreateNewPost'
         executionStatus = 'NotExecuted'
         completionClaimAllowed = $false
         guards = [pscustomobject]@{
-            existingPostModificationForbidden = $true
-            publicationSettingsForbidden = $true
-            publicOrPrivatePublishForbidden = $true
+            existingPostModificationForbidden = $false
+            publicationSettingsForbidden = $false
+            publicOrPrivatePublishForbidden = $false
+            requireExactTargetSelection = $true
+            requireOperatorConfirmation = $true
+            requireDeleteOrPublishReconfirmation = $true
+            forbidUnselectedPostOrSettingMutation = $true
             requireActionByActionObservation = $true
             requirePcAndMobileResultValidation = $true
             requireWholeEditorAuditBeforeStop = $true

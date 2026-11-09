@@ -21,44 +21,51 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
     $completed = New-Object System.Collections.ArrayList
     foreach ($old in @($state.Completed)) { [void]$completed.Add($old) }
     $failed = New-Object System.Collections.ArrayList
-    foreach ($item in $selected) {
-        Write-Host ("{0}번 글을 작성하고 있습니다." -f $item.Number)
-        try {
-            $prompt = $writePrompt.TrimEnd()+"`n`n"+$existingPostContext+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
-            $article = $null
-            $lastValidationMessage = ''
-            for ($generationAttempt=1; $generationAttempt -le 3; $generationAttempt++) {
-                $attemptPrompt = $prompt
-                if ($lastValidationMessage) {
-                    $attemptPrompt += "`n이전 생성 결과는 다음 자동 검증을 통과하지 못했습니다: $lastValidationMessage`n기사와 원문은 유효하므로 소재를 버리지 말고 정해진 출력 구조를 정확히 고쳐 전체 글을 다시 생성하세요.`n"
-                }
-                $stamp = (Get-Date -Format 'yyyyMMdd_HHmmss_fff')
-                $rawPath = Join-Path $run ('{0:D2}_글쓰기_원본_{1}_{2}.txt' -f ([int]$item.Number),$stamp,$generationAttempt)
-                $response = Invoke-Codex $attemptPrompt $rawPath
-                $repairPath = Join-Path $run ('{0:D2}_사실검증보완_{1}_{2}.txt' -f ([int]$item.Number),$stamp,$generationAttempt)
-                try {
-                    $article = Resolve-ArticleWithFactCheckRepair $response $item.Site $item.Url $allowedRelatedUrls $repairPath
-                    break
-                } catch {
-                    $lastValidationMessage = $_.Exception.Message
-                    Write-ErrorLog ("{0}번 글 내부 자동복구 {1}/3: {2}" -f $item.Number,$generationAttempt,$lastValidationMessage)
-                    if ($generationAttempt -ge 3) { throw }
-                }
-            }
-            if ($null -eq $article) { throw '유효한 기사 글의 자동 생성과 재검증을 완료하지 못했습니다.' }
-            $path = Save-Article $item $article
-            Add-UsedUrl $item.Url
-            [void]$completed.Add([pscustomobject]@{ Number=$item.Number; Path=$path; CompletedAt=(Get-Date).ToString('o') })
-            Write-Host "완료: $path"
-        } catch {
-            $message = "$($item.Number)번 소재 실패: $($_.Exception.Message)"
-            [void]$failed.Add([pscustomobject]@{ Candidate=$item; Message=$message; FailedAt=(Get-Date).ToString('o') })
-            Write-ErrorLog $message
-            Write-Host $message -ForegroundColor Red
+    $commonPath=Join-Path $PSScriptRoot '공통.ps1'
+    $workerPath=Join-Path $PSScriptRoot '선택글_생성작업.ps1'
+    $promptPath=Join-Path $script:PromptDir '02_최종_글쓰기_프롬프트.md'
+    $sharedPath=Join-Path $run '공통실행자료'
+    [IO.Directory]::CreateDirectory($sharedPath)|Out-Null
+    [IO.File]::WriteAllText((Join-Path $sharedPath '기존글문맥.txt'),$existingPostContext,$script:Utf8)
+    Write-JsonAtomic (Join-Path $sharedPath '관련글허용주소.json') @($allowedRelatedUrls) 5
+    $pending=@($selected)
+    $maximumParallel=2
+    for($offset=0;$offset -lt $pending.Count;$offset+=$maximumParallel){
+        $batch=@($pending[$offset..([Math]::Min($offset+$maximumParallel-1,$pending.Count-1))])
+        $jobs=New-Object System.Collections.ArrayList
+        foreach($item in $batch){
+            Write-Host ("{0}번 글을 작성하고 있습니다." -f $item.Number)
+            $itemPath=Join-Path $sharedPath ('선택기사_{0}.json' -f [int]$item.Number)
+            $resultPath=Join-Path $sharedPath ('생성결과_{0}.clixml' -f [int]$item.Number)
+            Write-JsonAtomic $itemPath $item 12
+            $job=Start-Job -FilePath $workerPath -ArgumentList @($commonPath,$promptPath,$itemPath,(Join-Path $sharedPath '기존글문맥.txt'),(Join-Path $sharedPath '관련글허용주소.json'),$run,$resultPath)
+            [void]$jobs.Add([pscustomobject]@{Job=$job;Item=$item;ResultPath=$resultPath})
         }
-        $state.Completed = @($completed); $state.Failed = @($failed)
-        $state.Status = if ($failed.Count) { '일부 실패' } else { '작성 중' }
-        Save-RunState $run $state
+        foreach($entry in @($jobs)){
+            $item=$entry.Item
+            try{
+                $null=Wait-Job -Job $entry.Job
+                $jobOutput=@(Receive-Job -Job $entry.Job -ErrorAction Stop)
+                if($entry.Job.State -ne 'Completed' -or -not(Test-Path -LiteralPath $entry.ResultPath -PathType Leaf)){
+                    $reason=if($entry.Job.ChildJobs[0].JobStateInfo.Reason){$entry.Job.ChildJobs[0].JobStateInfo.Reason.Message}else{'병렬 글 생성 결과가 없습니다.'}
+                    throw $reason
+                }
+                $article=Import-Clixml -LiteralPath $entry.ResultPath
+                $path=Save-Article $item $article
+                Add-UsedUrl $item.Url
+                [void]$completed.Add([pscustomobject]@{Number=$item.Number;Path=$path;CompletedAt=(Get-Date).ToString('o')})
+                Write-Host "완료: $path"
+            }catch{
+                $message="$($item.Number)번 소재 실패: $($_.Exception.Message)"
+                [void]$failed.Add([pscustomobject]@{Candidate=$item;Message=$message;FailedAt=(Get-Date).ToString('o')})
+                Write-ErrorLog $message
+            }finally{
+                if($null -ne $entry.Job){Remove-Job -Job $entry.Job -Force -ErrorAction SilentlyContinue}
+            }
+            $state.Completed=@($completed);$state.Failed=@($failed)
+            $state.Status=if($failed.Count){'일부 실패'}else{'작성 중'}
+            Save-RunState $run $state
+        }
     }
     $state.Status = if ($failed.Count -eq 0) { '글 작성 완료' } elseif ($completed.Count) { '일부 실패' } else { '실패' }
     Save-RunState $run $state

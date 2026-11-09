@@ -5,6 +5,7 @@ Add-Type -AssemblyName System.Drawing
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $optimizer = Join-Path $projectRoot '프로그램\이미지최적화.ps1'
 $validator = Join-Path $projectRoot '프로그램\이미지검증.ps1'
+$repairer = Join-Path $projectRoot '프로그램\이미지자동복구.ps1'
 $systemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
 $testRoot = Join-Path $systemTemp ('네이버 이미지 자동화 테스트 ' + [guid]::NewGuid().ToString('N'))
 $originalDirectory = Join-Path $testRoot 'original'
@@ -63,6 +64,25 @@ try {
     $overwriteWasBlocked = $false
     try { & $optimizer -ManifestPath $manifestPath | Out-Null } catch { $overwriteWasBlocked = $true }
     if (-not $overwriteWasBlocked) { throw 'The optimizer overwrote existing outputs.' }
+
+    $missingOutput=Join-Path $optimizedDirectory $roles[1].Output
+    Remove-Item -LiteralPath $missingOutput -Force
+    $repaired=& $repairer -ManifestPath $manifestPath|ConvertFrom-Json
+    if(-not $repaired.isValid -or -not(Test-Path -LiteralPath $missingOutput -PathType Leaf)){throw 'A missing optimized image was not repaired from its original.'}
+
+    $fallbackRoot=Join-Path $testRoot 'fallback'
+    $fallbackOriginal=Join-Path $fallbackRoot 'original'
+    $fallbackOptimized=Join-Path $fallbackRoot 'optimized'
+    $null=New-Item -ItemType Directory -Path $fallbackOriginal
+    $null=New-Item -ItemType Directory -Path $fallbackOptimized
+    $fallbackManifest=Join-Path $fallbackRoot 'manifest.json'
+    [pscustomobject]@{
+        schemaVersion=1;contentId='TEST-FALLBACK';originalDirectory=$fallbackOriginal;optimizedDirectory=$fallbackOptimized
+        specification=[pscustomobject]@{count=3;width=1200;height=800;aspectRatio='3:2';format='JPEG';initialJpegQuality=84;minimumJpegQuality=68;maximumKilobytes=450}
+        assets=@($roles|ForEach-Object {[pscustomobject]@{order=$_.Order;role=$_.Role;prompt=('기술 시각화 '+$_.Role);originalBaseName=$_.Base;outputFileName=$_.Output;placement=$_.Placement}})
+    }|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $fallbackManifest -Encoding UTF8
+    $fallback=& $repairer -ManifestPath $fallbackManifest|ConvertFrom-Json
+    if(-not $fallback.isValid -or @(Get-ChildItem -LiteralPath $fallbackOptimized -File -Filter '*.jpg').Count -ne 3){throw 'Missing source images were not generated and optimized automatically.'}
 
     Write-Output 'Image automation tests passed.'
 }
