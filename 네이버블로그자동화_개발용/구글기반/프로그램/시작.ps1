@@ -25,10 +25,27 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
         Write-Host ("{0}번 글을 작성하고 있습니다." -f $item.Number)
         try {
             $prompt = $writePrompt.TrimEnd()+"`n`n"+$existingPostContext+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
-            $rawPath = Join-Path $run ('{0:D2}_글쓰기_원본_{1}.txt' -f ([int]$item.Number),(Get-Date -Format 'yyyyMMdd_HHmmss'))
-            $response = Invoke-Codex $prompt $rawPath
-            $repairPath = Join-Path $run ('{0:D2}_사실검증보완_{1}.txt' -f ([int]$item.Number),(Get-Date -Format 'yyyyMMdd_HHmmss'))
-            $article = Resolve-ArticleWithFactCheckRepair $response $item.Site $item.Url $allowedRelatedUrls $repairPath
+            $article = $null
+            $lastValidationMessage = ''
+            for ($generationAttempt=1; $generationAttempt -le 3; $generationAttempt++) {
+                $attemptPrompt = $prompt
+                if ($lastValidationMessage) {
+                    $attemptPrompt += "`n이전 생성 결과는 다음 자동 검증을 통과하지 못했습니다: $lastValidationMessage`n기사와 원문은 유효하므로 소재를 버리지 말고 정해진 출력 구조를 정확히 고쳐 전체 글을 다시 생성하세요.`n"
+                }
+                $stamp = (Get-Date -Format 'yyyyMMdd_HHmmss_fff')
+                $rawPath = Join-Path $run ('{0:D2}_글쓰기_원본_{1}_{2}.txt' -f ([int]$item.Number),$stamp,$generationAttempt)
+                $response = Invoke-Codex $attemptPrompt $rawPath
+                $repairPath = Join-Path $run ('{0:D2}_사실검증보완_{1}_{2}.txt' -f ([int]$item.Number),$stamp,$generationAttempt)
+                try {
+                    $article = Resolve-ArticleWithFactCheckRepair $response $item.Site $item.Url $allowedRelatedUrls $repairPath
+                    break
+                } catch {
+                    $lastValidationMessage = $_.Exception.Message
+                    Write-ErrorLog ("{0}번 글 내부 자동복구 {1}/3: {2}" -f $item.Number,$generationAttempt,$lastValidationMessage)
+                    if ($generationAttempt -ge 3) { throw }
+                }
+            }
+            if ($null -eq $article) { throw '유효한 기사 글의 자동 생성과 재검증을 완료하지 못했습니다.' }
             $path = Save-Article $item $article
             Add-UsedUrl $item.Url
             [void]$completed.Add([pscustomobject]@{ Number=$item.Number; Path=$path; CompletedAt=(Get-Date).ToString('o') })

@@ -185,13 +185,12 @@ Assert ($repairState.Prompt -match '공개 본문 HTML과 ## 1~5 공개 메타�
 Assert ($repairState.Prompt -match [regex]::Escape($articleUrl)) '자동 보완에 선택 원문 URL 전달'
 Assert ($repairedArticle.FactCheck -match '### 검증 3') '자동 보완 결과 재검증'
 $changedPublicMock = { param($repairPrompt,$repairOutputPath) return $response.Replace('기술 검증이 바꾸는 Blogger 자동화의 핵심','자동 보완이 바꾼 공개 제목') }.GetNewClosure()
-$changedPublicBlocked = $false
-try { [void](Resolve-ArticleWithFactCheckRepair $twoFactResponse 'TechCrunch' $articleUrl @() '시험_공개변경차단.txt' $changedPublicMock) } catch { $changedPublicBlocked = $_.Exception.Message -match '공개 본문 또는 메타데이터가 변경' }
-Assert $changedPublicBlocked '자동 보완 중 공개 본문·메타데이터 변경 차단'
+$publicPreservedArticle = Resolve-ArticleWithFactCheckRepair $twoFactResponse 'TechCrunch' $articleUrl @() '시험_공개변경무시.txt' $changedPublicMock
+Assert ($publicPreservedArticle.RecommendedTitle -eq '기술 검증이 바꾸는 Blogger 자동화의 핵심') '자동 보완 응답의 공개 변경을 버리고 원문 보존'
 $noRepairMock = { throw '정상 응답에서 자동 보완이 실행됐습니다.' }
 $validWithoutRepair = Resolve-ArticleWithFactCheckRepair $response 'TechCrunch' $articleUrl @() '사용하지_않음.txt' $noRepairMock
 Assert ($validWithoutRepair.FactCheck -match '### 검증 3') '정상 응답은 자동 보완 없이 통과'
-$results.Add('사실검증 3개 미만 자동 보완 1회·재검증: 통과')
+$results.Add('사실검증 자동 보완·공개 영역 보존·재검증: 통과')
 try {
     $shortQuestion=$response.Replace('이 기술을 장기적으로 도입할 때 가장 먼저 해결해야 할 비용과 인프라 문제는 무엇일까요?','짧은 질문인가요?')
     Split-Article $shortQuestion 'TechCrunch' $articleUrl | Out-Null
@@ -211,6 +210,12 @@ $relatedHtml = $html.Replace($sourceEnd+"`n</div>",$sourceEnd+"`n"+$relatedBlock
 $relatedResponse = '```html'+"`n"+$relatedHtml+"`n"+'```'+"`n`n"+$metadata
 $relatedArticle = Split-Article $relatedResponse 'TechCrunch' $articleUrl @($relatedUrl)
 Assert ($relatedArticle.Html -match 'data-blog-related="true"') '관련 기존 글 선택 영역 허용'
+$nestedRelatedHtml = $html.Replace($sourceEnd+"`n</div>",($sourceEnd.Substring(0,$sourceEnd.Length-6)+"`n"+$relatedBlock+"`n</div>`n</div>"))
+$nestedRelatedResponse = '```html'+"`n"+$nestedRelatedHtml+"`n"+'```'+"`n`n"+$metadata
+$nestedRelatedArticle = Split-Article $nestedRelatedResponse 'TechCrunch' $articleUrl @($relatedUrl)
+$normalizedEnding = [regex]::Match($nestedRelatedArticle.Html,'(?is)data-blog-sources="true"[\s\S]*?</div>\s*<div\b(?=[^>]*data-blog-related="true")').Success
+Assert $normalizedEnding '출처 안에 잘못 중첩된 관련 글을 형제 영역으로 자동 복구'
+Assert ([regex]::Matches([regex]::Match($nestedRelatedArticle.Html,'(?is)<div\b(?=[^>]*data-blog-sources="true")[^>]*>(?<content>[\s\S]*?)</div>').Groups['content'].Value,'(?is)<a\b').Count -eq 1) '관련 글 링크를 출처 개수에서 제외'
 $unlistedRelatedRejected = $false
 try { [void](Split-Article $relatedResponse 'TechCrunch' $articleUrl @()) } catch { $unlistedRelatedRejected = $true }
 Assert $unlistedRelatedRejected '공개 기존 글 목록에 없는 관련 링크 차단'

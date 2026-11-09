@@ -373,11 +373,23 @@ function Repair-NaverDeterministicStyles([string]$html) {
     return $html
 }
 
+function Repair-SourceRelatedStructure([string]$html) {
+    # The model can omit the closing tag of the sources block and place the
+    # related-post block inside it.  In that case source validation sees the
+    # related link as a fourth source.  Both blocks are final root children,
+    # so normalize that one deterministic shape before semantic validation.
+    $nestedPattern = '(?is)(?<sourceOpen><div\b(?=[^>]*\bdata-blog-sources\s*=\s*["'']true["''])[^>]*>)(?<sourceLine>\s*<p\b[^>]*>[\s\S]*?</p>)\s*(?<related><div\b(?=[^>]*\bdata-blog-related\s*=\s*["'']true["''])[^>]*>[\s\S]*?</div>)\s*</div>(?<rootClose>\s*</div>\s*)\z'
+    $nested = [regex]::Match([string]$html,$nestedPattern)
+    if (-not $nested.Success) { return $html }
+    $replacement = $nested.Groups['sourceOpen'].Value + $nested.Groups['sourceLine'].Value + "`n</div>`n" + $nested.Groups['related'].Value + $nested.Groups['rootClose'].Value
+    return $html.Substring(0,$nested.Index) + $replacement
+}
+
 function Split-Article([string]$response, [string]$expectedSourceSite='', [string]$expectedSourceUrl='', [string[]]$allowedRelatedUrls=@()) {
     $normalized = $response.Trim().Replace("`r`n", "`n")
     $match = [regex]::Match($normalized, '\A```html\n(?<html>[\s\S]+?)\n```\n\n(?<meta>## 1\. SEO 키워드 분석[\s\S]+)\z')
     if (-not $match.Success) { throw 'HTML 코드 블록과 일반 Markdown 메타데이터가 정확히 분리되지 않았습니다.' }
-    $html = Repair-NaverDeterministicStyles (Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim())
+    $html = Repair-NaverDeterministicStyles (Repair-SourceRelatedStructure (Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim()))
     $allMeta = $match.Groups['meta'].Value.Trim()
     $expectedSourceSite = $expectedSourceSite.Trim()
     if (-not $expectedSourceSite) { throw '선택한 소재의 출처 사이트명이 없습니다.' }
@@ -641,28 +653,46 @@ function Resolve-ArticleWithFactCheckRepair(
     [string]$repairOutputPath='',
     [scriptblock]$repairInvoker=$null
 ) {
-    try {
-        return Split-Article $response $expectedSourceSite $expectedArticleUrl $allowedRelatedUrls
-    } catch {
-        if ($_.Exception.Message -notmatch '내부 사실검증표에는 검증 항목이 3개 이상 필요합니다') { throw }
-    }
-
-    Write-Host '내부 사실검증표가 부족하여 한 번 자동 보완합니다.' -ForegroundColor Yellow
-    $repairPrompt = New-FactCheckRepairPrompt $response $expectedArticleUrl
-    if ($null -ne $repairInvoker) {
-        $repairedResponse = & $repairInvoker $repairPrompt $repairOutputPath
-    } else {
-        if (-not $repairOutputPath) { throw '사실검증 자동 보완 응답을 저장할 경로가 없습니다.' }
-        $repairedResponse = Invoke-Codex $repairPrompt $repairOutputPath
-    }
     $factHeading = '## 6. 내부 사실검증표'
+    $factErrorPattern = '내부 사실검증표|사실검증 항목|사실검증 구분|사실검증 확인일|검증 기록|확인 URL'
+    $currentResponse = $response
     $originalFactIndex = $response.IndexOf($factHeading,[StringComparison]::Ordinal)
-    $repairedFactIndex = $repairedResponse.IndexOf($factHeading,[StringComparison]::Ordinal)
-    if ($originalFactIndex -lt 0 -or $repairedFactIndex -lt 0) { throw '사실검증 자동 보완 결과에서 내부 사실검증표 제목을 찾지 못했습니다.' }
+    if ($originalFactIndex -lt 0) { throw '원래 응답에서 내부 사실검증표 제목을 찾지 못했습니다.' }
     $originalPublic = $response.Substring(0,$originalFactIndex).TrimEnd()
-    $repairedPublic = $repairedResponse.Substring(0,$repairedFactIndex).TrimEnd()
-    if ($originalPublic -cne $repairedPublic) { throw '사실검증 자동 보완 과정에서 공개 본문 또는 메타데이터가 변경되어 결과를 차단했습니다.' }
-    return Split-Article $repairedResponse $expectedSourceSite $expectedArticleUrl $allowedRelatedUrls
+
+    for ($attempt=0; $attempt -le 3; $attempt++) {
+        try {
+            return Split-Article $currentResponse $expectedSourceSite $expectedArticleUrl $allowedRelatedUrls
+        } catch {
+            $validationMessage = $_.Exception.Message
+            if ($attempt -ge 3 -or $validationMessage -notmatch $factErrorPattern) { throw }
+        }
+
+        # Internal repair is intentionally silent.  Users only need the final
+        # completed article, not an intermediate yellow progress warning.
+        $repairPrompt = New-FactCheckRepairPrompt $currentResponse $expectedArticleUrl
+        $attemptPath = $repairOutputPath
+        if ($attempt -gt 0 -and $attemptPath) {
+            $attemptPath = [IO.Path]::Combine([IO.Path]::GetDirectoryName($attemptPath),([IO.Path]::GetFileNameWithoutExtension($attemptPath)+'_'+($attempt+1)+[IO.Path]::GetExtension($attemptPath)))
+        }
+        if ($null -ne $repairInvoker) {
+            $repairedResponse = & $repairInvoker $repairPrompt $attemptPath
+        } else {
+            if (-not $attemptPath) { throw '사실검증 자동 보완 응답을 저장할 경로가 없습니다.' }
+            $repairedResponse = Invoke-Codex $repairPrompt $attemptPath
+        }
+        $repairedFactIndex = $repairedResponse.IndexOf($factHeading,[StringComparison]::Ordinal)
+        if ($repairedFactIndex -lt 0) {
+            $currentResponse = $originalPublic + "`n`n" + $factHeading + "`n"
+            continue
+        }
+        # Never accept accidental public-content edits from a repair response.
+        # Take only its private fact-check section and merge it into the exact
+        # original public HTML/metadata before validating again.
+        $repairedFact = $repairedResponse.Substring($repairedFactIndex).Trim()
+        $currentResponse = $originalPublic + "`n`n" + $repairedFact
+    }
+    throw '내부 사실검증표 자동 보완을 완료하지 못했습니다.'
 }
 
 function Convert-ToBloggerHtml([string]$html) {
