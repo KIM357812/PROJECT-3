@@ -262,11 +262,92 @@ function Format-ExistingPostContext([object[]]$posts) {
     return "# 기존 게시글 목록`n아래 목록으로 동일 사건 중복 여부를 점검하고, 실제 관련 글만 0~3개 연결하십시오.`n" + ($lines -join "`n")
 }
 
+function ConvertTo-TableLabel([string]$value) {
+    $plain = [regex]::Replace([string]$value,'(?is)<[^>]+>',' ')
+    $plain = [Net.WebUtility]::HtmlDecode($plain)
+    return ([regex]::Replace($plain,'\s+',' ').Trim())
+}
+
+function ConvertTo-HtmlAttributeValue([string]$value) {
+    return [Net.WebUtility]::HtmlEncode([string]$value).Replace("'",'&#39;')
+}
+
+function Get-ResponsiveTableBlocks([string]$html) {
+    return @([regex]::Matches(
+        [string]$html,
+        '(?is)<div\b(?=[^>]*\bclass\s*=\s*["''][^"'']*\bsolidb-responsive-table\b[^"'']*["''])[^>]*>\s*<table\b[^>]*>[\s\S]*?</table>\s*</div>'
+    ))
+}
+
+function Repair-ResponsiveTableDataLabels([string]$html) {
+    $blocks = @(Get-ResponsiveTableBlocks $html)
+    for ($blockIndex = $blocks.Count - 1; $blockIndex -ge 0; $blockIndex--) {
+        $block = $blocks[$blockIndex]
+        $tableHtml = $block.Value
+        $headerRow = [regex]::Match($tableHtml,'(?is)<thead\b[^>]*>[\s\S]*?<tr\b[^>]*>(?<cells>[\s\S]*?)</tr>[\s\S]*?</thead>')
+        if (-not $headerRow.Success) { throw '반응형 데이터 표의 열 제목 행을 찾을 수 없습니다.' }
+        $headers = @([regex]::Matches($headerRow.Groups['cells'].Value,'(?is)<th\b[^>]*>(?<content>[\s\S]*?)</th>'))
+        if ($headers.Count -lt 1) { throw '반응형 데이터 표에 열 제목이 없습니다.' }
+        $labels = @($headers | ForEach-Object { ConvertTo-TableLabel $_.Groups['content'].Value })
+        if (@($labels | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { throw '반응형 데이터 표에 비어 있는 열 제목이 있습니다.' }
+
+        $body = [regex]::Match($tableHtml,'(?is)<tbody\b[^>]*>(?<rows>[\s\S]*?)</tbody>')
+        $rowsHtml = $body.Groups['rows'].Value
+        $rows = @([regex]::Matches($rowsHtml,'(?is)<tr\b[^>]*>[\s\S]*?</tr>'))
+        if ($rows.Count -lt 1) { throw '반응형 데이터 표에 내용 행이 없습니다.' }
+        for ($rowIndex = $rows.Count - 1; $rowIndex -ge 0; $rowIndex--) {
+            $row = $rows[$rowIndex]
+            $rowHtml = $row.Value
+            $cells = @([regex]::Matches($rowHtml,'(?is)<td\b(?<attrs>[^>]*)>'))
+            if ($cells.Count -ne $labels.Count) {
+                throw ('반응형 데이터 표의 열 제목 수({0})와 {1}번째 내용 행의 셀 수({2})가 다릅니다.' -f $labels.Count,($rowIndex + 1),$cells.Count)
+            }
+            for ($cellIndex = $cells.Count - 1; $cellIndex -ge 0; $cellIndex--) {
+                $cell = $cells[$cellIndex]
+                $attrs = [regex]::Replace($cell.Groups['attrs'].Value,'(?is)\s*\bdata-label\s*=\s*(?:"[^"]*"|''[^'']*'')','').Trim()
+                $open = '<td' + $(if ($attrs) { ' ' + $attrs } else { '' }) + ' data-label="' + (ConvertTo-HtmlAttributeValue $labels[$cellIndex]) + '">'
+                $rowHtml = $rowHtml.Substring(0,$cell.Index) + $open + $rowHtml.Substring($cell.Index + $cell.Length)
+            }
+            $rowsHtml = $rowsHtml.Substring(0,$row.Index) + $rowHtml + $rowsHtml.Substring($row.Index + $row.Length)
+        }
+        $tableHtml = $tableHtml.Substring(0,$body.Groups['rows'].Index) + $rowsHtml + $tableHtml.Substring($body.Groups['rows'].Index + $body.Groups['rows'].Length)
+        $html = $html.Substring(0,$block.Index) + $tableHtml + $html.Substring($block.Index + $block.Length)
+    }
+    return $html
+}
+
+function Assert-ResponsiveTableDataLabels([string]$html) {
+    $blocks = @(Get-ResponsiveTableBlocks $html)
+    $dataTableCount = @([regex]::Matches([string]$html,'(?is)<table\b[^>]*>[\s\S]*?</table>') | Where-Object { $_.Value -match '(?is)<thead\b' }).Count
+    if ($dataTableCount -gt $blocks.Count) { throw '데이터 표에는 모바일 세로형 변환 영역이 필요합니다.' }
+    if ($blocks.Count -eq 0) { return }
+    if ($html -notmatch '(?is)@media\s*\(max-width\s*:\s*600px\)[\s\S]*?\.solidb-responsive-table\s+td::before[\s\S]*?attr\(data-label\)') { throw '데이터 표의 모바일 세로형 스타일이 없습니다.' }
+
+    foreach ($block in $blocks) {
+        $headerRow = [regex]::Match($block.Value,'(?is)<thead\b[^>]*>[\s\S]*?<tr\b[^>]*>(?<cells>[\s\S]*?)</tr>[\s\S]*?</thead>')
+        $headers = @([regex]::Matches($headerRow.Groups['cells'].Value,'(?is)<th\b[^>]*>(?<content>[\s\S]*?)</th>'))
+        if ($headers.Count -lt 1) { throw '반응형 데이터 표에 열 제목이 없습니다.' }
+        $labels = @($headers | ForEach-Object { ConvertTo-TableLabel $_.Groups['content'].Value })
+        $body = [regex]::Match($block.Value,'(?is)<tbody\b[^>]*>(?<rows>[\s\S]*?)</tbody>')
+        $rows = @([regex]::Matches($body.Groups['rows'].Value,'(?is)<tr\b[^>]*>(?<cells>[\s\S]*?)</tr>'))
+        if ($rows.Count -lt 1) { throw '반응형 데이터 표에 내용 행이 없습니다.' }
+        for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+            $cells = @([regex]::Matches($rows[$rowIndex].Groups['cells'].Value,'(?is)<td\b(?<attrs>[^>]*)>'))
+            if ($cells.Count -ne $labels.Count) { throw '반응형 데이터 표의 열 제목과 내용 셀 개수가 일치하지 않습니다.' }
+            for ($cellIndex = 0; $cellIndex -lt $cells.Count; $cellIndex++) {
+                $labelMatch = [regex]::Match($cells[$cellIndex].Groups['attrs'].Value,'(?is)\bdata-label\s*=\s*["''](?<value>[^"'']+)["'']')
+                $actual = if ($labelMatch.Success) { [Net.WebUtility]::HtmlDecode($labelMatch.Groups['value'].Value).Trim() } else { '' }
+                if ($actual -ne $labels[$cellIndex]) { throw '모바일 표의 각 셀에는 순서가 일치하는 해당 열 제목 data-label이 필요합니다.' }
+            }
+        }
+    }
+}
+
 function Split-Article([string]$response, [string]$expectedSourceSite='', [string]$expectedSourceUrl='', [string[]]$allowedRelatedUrls=@()) {
     $normalized = $response.Trim().Replace("`r`n", "`n")
     $match = [regex]::Match($normalized, '\A```html\n(?<html>[\s\S]+?)\n```\n\n(?<meta>## 1\. SEO 키워드 분석[\s\S]+)\z')
     if (-not $match.Success) { throw 'HTML 코드 블록과 일반 Markdown 메타데이터가 정확히 분리되지 않았습니다.' }
-    $html = $match.Groups['html'].Value.Trim()
+    $html = Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim()
     $allMeta = $match.Groups['meta'].Value.Trim()
     $expectedSourceSite = $expectedSourceSite.Trim()
     if (-not $expectedSourceSite) { throw '선택한 소재의 출처 사이트명이 없습니다.' }
@@ -296,15 +377,7 @@ function Split-Article([string]$response, [string]$expectedSourceSite='', [strin
         throw '육하원칙 내용은 양쪽 정렬, 마지막 줄 왼쪽 정렬과 긴 영문 줄바꿈 속성이 필요합니다.'
     }
 
-    if ($html -match '(?is)<table\b') {
-        if ($html -notmatch '(?is)<div\b[^>]*class\s*=\s*["''][^"'']*\bsolidb-responsive-table\b[^"'']*["'']') { throw '데이터 표에는 모바일 세로형 변환 영역이 필요합니다.' }
-        if ($html -notmatch '(?is)@media\s*\(max-width\s*:\s*600px\)[\s\S]*?\.solidb-responsive-table\s+td::before[\s\S]*?attr\(data-label\)') { throw '데이터 표의 모바일 세로형 스타일이 없습니다.' }
-        $tableCells = @([regex]::Matches($html,'(?is)<td\b(?<attrs>[^>]*)>'))
-        if ($tableCells.Count -lt 1) { throw '데이터 표에 내용 셀이 없습니다.' }
-        foreach ($cell in $tableCells) {
-            if ($cell.Groups['attrs'].Value -notmatch '(?i)\bdata-label\s*=\s*["''][^"'']+["'']') { throw '모바일 표의 각 셀에는 해당 열 제목인 data-label이 필요합니다.' }
-        }
-    }
+    Assert-ResponsiveTableDataLabels $html
 
     $imageTags = @([regex]::Matches($html,'(?is)<img\b[^>]*>'))
     if ($imageTags.Count -ne 4) { throw '본문 이미지 placeholder가 4개가 아닙니다.' }
