@@ -63,6 +63,10 @@ if($leaf -eq 'first' -and -not(Test-Path -LiteralPath $failureMarker)){
     if($retryPackages.Count -ne 3 -or $retryPackages[1].source -notlike '*작업완료*first' -or $retryPackages[2].source -notlike '*작업완료*second'){throw 'Generation and package failures were not both retried'}
     if($retryPackages[0].outputRoot -ne $initialRoots[0]){throw 'Completed packages were duplicated during retry'}
     if($retry.runStatePath -ne $result.runStatePath){throw 'Retry created a new search run instead of resuming the failed state'}
+    if($retry.queueManifest -eq $result.queueManifest -or -not(Test-Path -LiteralPath $result.queueManifest)){throw 'Retry overwrote the previous queue manifest'}
+    $rejected=$false
+    try{$null=& (Join-Path $program '구글기반_새글생성.ps1') -WorkRoot $work -RetryLatest|ConvertFrom-Json}catch{$rejected=$_.Exception.Message -match '재시도할 실패 글이 없습니다'}
+    if(-not $rejected){throw 'A resolved old failure was offered for retry again'}
     if($env:NAVER_AUTOMATION_RUNTIME_ROOT -ne $oldRuntime){throw 'Runtime environment leaked'}
     'New-work wrapper integration tests: PASS (partial success and failed-only retry, no browser)'
 } finally {

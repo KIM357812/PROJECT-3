@@ -30,13 +30,48 @@ function Get-LatestRetryStatePath([string]$runtimeRoot) {
 }
 
 function Get-LatestRetryManifest([string]$packageRoot) {
+    $seenRuns = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($file in @(Get-ChildItem -LiteralPath $packageRoot -Filter '작업대기_*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
         try {
             $manifest = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            if (-not $manifest.runStatePath) { continue }
+            $runKey = [IO.Path]::GetFullPath([string]$manifest.runStatePath)
+            if (-not $seenRuns.Add($runKey)) { continue }
             if ([int]$manifest.failedCount -gt 0 -and $manifest.runStatePath -and (Test-Path -LiteralPath ([string]$manifest.runStatePath) -PathType Leaf)) { return $manifest }
         } catch { }
     }
     return $null
+}
+
+function Assert-PathUnderRoot([string]$path,[string]$root,[string]$message) {
+    $full = [IO.Path]::GetFullPath($path)
+    $allowed = [IO.Path]::GetFullPath($root).TrimEnd('\')+'\'
+    if (-not $full.StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw $message }
+    return $full
+}
+
+function Write-JsonAtomic([string]$path,[object]$value,[int]$depth=15) {
+    $temporary = $path + '.tmp-' + [guid]::NewGuid().ToString('N')
+    $backup = $path + '.replace-' + [guid]::NewGuid().ToString('N')
+    try {
+        $json = $value | ConvertTo-Json -Depth $depth
+        [IO.File]::WriteAllText($temporary,$json,(New-Object Text.UTF8Encoding($false)))
+        try {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                [IO.File]::Replace($temporary,$path,$backup)
+                [IO.File]::Delete($backup)
+            } else {
+                [IO.File]::Move($temporary,$path)
+            }
+        } catch [System.UnauthorizedAccessException] {
+            # 일부 제한된 Windows 임시 폴더는 같은 폴더 안의 원자적 이름 변경도
+            # 차단합니다. 이때만 완성된 JSON 문자열을 직접 기록합니다.
+            [IO.File]::WriteAllText($path,$json,(New-Object Text.UTF8Encoding($false)))
+        }
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        if ([IO.File]::Exists($backup)) { [IO.File]::Delete($backup) }
+    }
 }
 
 function Get-ExistingPackage([string]$root,[string]$sourceArticlePath) {
@@ -68,6 +103,7 @@ if ($RetryLatest) {
     if ($null -ne $retryManifest) { $retryStatePath = [string]$retryManifest.runStatePath }
     if (-not $retryStatePath) { $retryStatePath = Get-LatestRetryStatePath $runtimeRoot }
     if (-not $retryStatePath) { throw '재시도할 실패 글이 없습니다. 기사 재검색은 실행하지 않았습니다.' }
+    $retryStatePath = Assert-PathUnderRoot $retryStatePath (Join-Path $runtimeRoot '작업대기') '재시도 상태가 현재 네이버 작업 폴더 밖을 가리킵니다.'
     $retryState = Get-Content -LiteralPath $retryStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
     $retryGenerationFailures = @($retryState.Failed | Where-Object { $null -ne $_.Candidate }).Count
 } else {
@@ -104,11 +140,11 @@ foreach ($articlePath in @($generation.completedPaths)) {
     try {
         $package = Get-ExistingPackage $naverWorkRoot $articlePath
         if ($null -eq $package) {
-            $contentId = 'NTE-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + ('-{0:D2}' -f $sequence)
+            $contentId = 'NTE-' + (Get-Date -Format 'yyyyMMdd-HHmmssfff') + ('-{0:D2}-' -f $sequence) + [guid]::NewGuid().ToString('N').Substring(0,6)
             $package = & $adapterPath -SourceArticlePath $articlePath -WorkRoot $naverWorkRoot -ContentId $contentId | ConvertFrom-Json
             $package | Add-Member -NotePropertyName sourceArticlePath -NotePropertyValue ([IO.Path]::GetFullPath($articlePath)) -Force
             $executionPackagePath = Join-Path ([string]$package.outputRoot) '실행패키지.json'
-            $package | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $executionPackagePath -Encoding UTF8
+            Write-JsonAtomic $executionPackagePath $package 15
         }
         [void]$packages.Add($package)
     } catch {
@@ -138,7 +174,7 @@ $queue = [pscustomobject]@{
     packages = @($packages.ToArray())
     failures = @($failures)
 }
-$queuePath = Join-Path $naverWorkRoot ('작업대기_{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$queue | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $queuePath -Encoding UTF8
+$queuePath = Join-Path $naverWorkRoot ('작업대기_{0}_{1}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmssfff'),[guid]::NewGuid().ToString('N').Substring(0,6))
+Write-JsonAtomic $queuePath $queue 15
 $queue | Add-Member -NotePropertyName queueManifest -NotePropertyValue $queuePath
 $queue | ConvertTo-Json -Depth 15
