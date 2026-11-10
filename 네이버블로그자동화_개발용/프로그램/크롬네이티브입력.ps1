@@ -14,7 +14,8 @@ param(
     [Parameter(Mandatory=$true)][string]$PayloadPath,
     [switch]$SelectAll,
     [ValidateRange(1,3)][int]$SelectAllCount=1,
-    [switch]$SkipClick
+    [switch]$SkipClick,
+    [switch]$Backspace
 )
 $ErrorActionPreference='Stop'
 
@@ -134,6 +135,10 @@ if(-not $SkipClick){
 if($SelectAll){
     1..$SelectAllCount|ForEach-Object {[Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 80}
     [Windows.Forms.SendKeys]::SendWait('{BACKSPACE}')
+}
+if($Backspace){
+    [Windows.Forms.SendKeys]::SendWait('{BACKSPACE}')
+    Start-Sleep -Milliseconds 180
 }
 
 if($Mode -ne 'Click'){
