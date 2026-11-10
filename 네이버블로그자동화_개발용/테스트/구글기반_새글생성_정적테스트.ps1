@@ -23,6 +23,7 @@ if ($startText -notmatch 'Read-CandidateSelection') { throw 'PowerShell 사용�
 if ($startText -match 'Start-Job\s+-FilePath\s+\$workerPath|\$maximumParallel=2') { throw '선택 글 병렬 일괄 생성이 남아 있습니다.' }
 if ($startText -notmatch 'foreach\(\$item in \$pending\)' -or $startText -notmatch '번 글이 준비되었습니다') { throw '선택 순서별 한 건 생성·즉시 완료 기록이 없습니다.' }
 if ($startText -notmatch '공통실행자료' -or $workerText -notmatch 'Resolve-ArticleWithFactCheckRepair') { throw '실행 공통자료 재사용 또는 글별 단계 복구가 없습니다.' }
+if($workerText -notmatch '이미지선행요청\.ps1' -or $workerText.IndexOf('이미지선행요청.ps1') -gt $workerText.IndexOf('Invoke-Codex $prompt')){throw '기사 선택 직후 이미지 요청이 본문 생성보다 먼저 시작되지 않습니다.'}
 if ($text -notmatch 'Get-NaverGenerationResult' -or $text -notmatch 'selectedCount' -or $text -notmatch 'PartiallyCompleted' -or $text -notmatch 'automaticRecoveryAttempt') { throw '1~3건 독립 패키지·부분 성공·내부 자동복구 연결이 없습니다.' }
 if ($startText -match '\$maximumAutomaticRecoveryPasses=3' -or $workerText -match 'for\(\$generationAttempt=1;\$generationAttempt -le 3') { throw '전체 글 중첩 재생성 구조가 남아 있습니다.' }
 if ($workerText -notmatch 'RecoveryStatePath' -or $workerText -notmatch 'Save-RecoveryState') { throw '글별 실패 단계 상태 기록이 없습니다.' }

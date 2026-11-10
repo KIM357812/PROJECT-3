@@ -79,7 +79,7 @@ $html = @'
 </div>
 '@
 $html = $html.Replace('FIRST_IMAGE',$firstImage).Replace('LAZY_IMAGE_2',$lazyImage.Replace('NUMBER','2')).Replace('LAZY_IMAGE_3',$lazyImage.Replace('NUMBER','3')).Replace('LAZY_IMAGE_4',$lazyImage.Replace('NUMBER','4')).Replace('PARAGRAPH_STYLE',$paragraphStyle).Replace('FILLER',$filler).Replace('ARTICLE_URL',$articleUrl).Trim()
-$promptTerms = 'photorealistic, realistic editorial photography, natural lighting, high detail, professional composition, textless, no text, no letters, no numbers, no watermark, no logo'
+$promptTerms = 'photorealistic, realistic editorial photography, natural lighting, high detail, professional composition, textless, no text, no letters, no numbers, no watermark, no AI-generated logos'
 $metadata = @'
 ## 1. SEO 키워드 분석
 - 메인 키워드: 기술 검증

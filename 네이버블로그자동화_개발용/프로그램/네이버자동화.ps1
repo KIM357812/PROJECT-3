@@ -21,7 +21,7 @@ $requiredPaths = @(
     (Join-Path $PSScriptRoot '이미지최적화.ps1'),
     (Join-Path $PSScriptRoot '이미지검증.ps1'),
     (Join-Path $PSScriptRoot '이미지자동복구.ps1'),
-    (Join-Path $PSScriptRoot '이미지로컬생성.ps1'),
+    (Join-Path $PSScriptRoot '이미지선행요청.ps1'),
     (Join-Path $PSScriptRoot '크롬직접연결.ps1'),
     (Join-Path $PSScriptRoot '크롬직접실행.mjs'),
     (Join-Path $PSScriptRoot '크롬네이티브입력.ps1')

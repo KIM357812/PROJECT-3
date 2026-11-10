@@ -259,6 +259,7 @@
     "InitialJpegQuality": 84,
     "MinimumJpegQuality": 68,
     "MaximumKilobytes": 450,
+    "MaximumPerceptualSimilarityPercent": 68,
     "RequireCentralSquareSafeArea": true,
     "ForbidEmbeddedText": true,
     "ForbidLogosAndWatermarks": true,

@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$ManifestPath
+    [string]$ManifestPath,
+    [switch]$ReportOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,44 @@ if ([IO.Path]::GetFullPath([string]$manifest.originalDirectory) -eq [IO.Path]::G
 
 $checked = @()
 $optimizedHashes = @{}
+$perceptualSignatures = @{}
+
+function Get-DifferenceHash([string]$Path) {
+    $source = $null
+    $sample = $null
+    $graphics = $null
+    try {
+        $source = [Drawing.Image]::FromFile($Path)
+        $sample = New-Object Drawing.Bitmap(17, 16, [Drawing.Imaging.PixelFormat]::Format24bppRgb)
+        $graphics = [Drawing.Graphics]::FromImage($sample)
+        $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.DrawImage($source, 0, 0, 17, 16)
+        $bits = New-Object 'System.Collections.Generic.List[bool]'
+        for ($y = 0; $y -lt 16; $y++) {
+            for ($x = 0; $x -lt 16; $x++) {
+                $left = $sample.GetPixel($x, $y)
+                $right = $sample.GetPixel($x + 1, $y)
+                $leftLuma = ($left.R * 299) + ($left.G * 587) + ($left.B * 114)
+                $rightLuma = ($right.R * 299) + ($right.G * 587) + ($right.B * 114)
+                $bits.Add($leftLuma -gt $rightLuma)
+            }
+        }
+        return ,$bits.ToArray()
+    } finally {
+        if ($null -ne $graphics) { $graphics.Dispose() }
+        if ($null -ne $sample) { $sample.Dispose() }
+        if ($null -ne $source) { $source.Dispose() }
+    }
+}
+
+function Get-PerceptualSimilarity([bool[]]$Left, [bool[]]$Right) {
+    if ($Left.Count -ne $Right.Count -or $Left.Count -eq 0) { return 0.0 }
+    $different = 0
+    for ($index = 0; $index -lt $Left.Count; $index++) {
+        if ($Left[$index] -ne $Right[$index]) { $different++ }
+    }
+    return [Math]::Round((1.0 - ($different / [double]$Left.Count)) * 100.0, 1)
+}
 foreach ($asset in $assets) {
     $path = Join-Path ([string]$manifest.optimizedDirectory) ([string]$asset.outputFileName)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -59,6 +98,7 @@ foreach ($asset in $assets) {
             $issues += "이미지 용량이 $($spec.maximumKilobytes)KB를 넘습니다: $($asset.outputFileName)"
         }
         $checked += [pscustomobject]@{
+            order = [int]$asset.order
             role = [string]$asset.role
             path = $path
             width = $image.Width
@@ -68,8 +108,41 @@ foreach ($asset in $assets) {
             sourceSha256 = [string]$asset.sourceSha256
             optimizedSha256 = $actualHash
         }
+        $perceptualSignatures[[string]$asset.outputFileName] = Get-DifferenceHash $path
     } finally {
         if ($null -ne $image) { $image.Dispose() }
+    }
+}
+
+$maximumSimilarity = if ($null -ne $spec.maximumPerceptualSimilarityPercent) {
+    [double]$spec.maximumPerceptualSimilarityPercent
+} else { 68.0 }
+$duplicatePairs = New-Object 'System.Collections.Generic.List[object]'
+$perceptualComparisons = New-Object 'System.Collections.Generic.List[object]'
+for ($leftIndex = 0; $leftIndex -lt $checked.Count; $leftIndex++) {
+    for ($rightIndex = $leftIndex + 1; $rightIndex -lt $checked.Count; $rightIndex++) {
+        $left = $checked[$leftIndex]
+        $right = $checked[$rightIndex]
+        $leftName = [IO.Path]::GetFileName([string]$left.path)
+        $rightName = [IO.Path]::GetFileName([string]$right.path)
+        $leftSignature = [bool[]]$perceptualSignatures[$leftName]
+        $rightSignature = [bool[]]$perceptualSignatures[$rightName]
+        $similarity = Get-PerceptualSimilarity -Left $leftSignature -Right $rightSignature
+        $perceptualComparisons.Add([pscustomobject]@{
+            leftOrder = [int]$left.order
+            rightOrder = [int]$right.order
+            similarityPercent = $similarity
+        })
+        if ($similarity -gt $maximumSimilarity) {
+            $duplicatePairs.Add([pscustomobject]@{
+                leftOrder = [int]$left.order
+                rightOrder = [int]$right.order
+                leftRole = [string]$left.role
+                rightRole = [string]$right.role
+                similarityPercent = $similarity
+            })
+            $issues += "역할이 다른 이미지가 시각적으로 지나치게 유사합니다: $($left.role)/$($right.role) ($similarity%)"
+        }
     }
 }
 
@@ -77,8 +150,11 @@ $result = [pscustomobject]@{
     isValid = ($issues.Count -eq 0 -and $checked.Count -eq [int]$spec.count)
     issues = @($issues)
     checkedImages = @($checked)
+    maximumPerceptualSimilarityPercent = $maximumSimilarity
+    perceptualComparisons = @($perceptualComparisons.ToArray())
+    perceptualDuplicatePairs = @($duplicatePairs.ToArray())
 }
 $result | ConvertTo-Json -Depth 6
-if (-not $result.isValid) {
+if (-not $result.isValid -and -not $ReportOnly) {
     throw ('이미지 검증에 실패했습니다: ' + (@($issues) -join '; '))
 }

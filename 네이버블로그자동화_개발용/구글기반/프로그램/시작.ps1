@@ -41,6 +41,20 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
                 if(-not(Test-Path -LiteralPath $resultPath -PathType Leaf)){throw '글 생성 결과가 없습니다.'}
                 $article=Import-Clixml -LiteralPath $resultPath
                 $path=Save-Article $item $article
+                $recoveryState=Get-Content -LiteralPath $recoveryStatePath -Raw -Encoding UTF8|ConvertFrom-Json
+                if($recoveryState.imageRequestPath -and (Test-Path -LiteralPath ([string]$recoveryState.imageRequestPath) -PathType Leaf)){
+                    Copy-Item -LiteralPath ([string]$recoveryState.imageRequestPath) -Destination (Join-Path $path 'ChatGPT_이미지선행요청.json') -Force
+                    $earlyRequest=Get-Content -LiteralPath ([string]$recoveryState.imageRequestPath) -Raw -Encoding UTF8|ConvertFrom-Json
+                    $earlyOriginalDirectory=[string]$earlyRequest.originalDirectory
+                    if(Test-Path -LiteralPath $earlyOriginalDirectory -PathType Container){
+                        $earlyFiles=@(Get-ChildItem -LiteralPath $earlyOriginalDirectory -File|Where-Object Extension -Match '^\.(jpg|jpeg|png|webp)$'|Sort-Object Name)
+                        if($earlyFiles.Count -eq 4){
+                            $articleOriginalDirectory=Join-Path $path '원본이미지'
+                            if(-not(Test-Path -LiteralPath $articleOriginalDirectory -PathType Container)){[IO.Directory]::CreateDirectory($articleOriginalDirectory)|Out-Null}
+                            foreach($earlyFile in $earlyFiles){Copy-Item -LiteralPath $earlyFile.FullName -Destination (Join-Path $articleOriginalDirectory $earlyFile.Name) -Force}
+                        }
+                    }
+                }
                 Add-UsedUrl $item.Url
                 [void]$completed.Add([pscustomobject]@{Number=$item.Number;Path=$path;CompletedAt=(Get-Date).ToString('o')})
                 $completionSequence++

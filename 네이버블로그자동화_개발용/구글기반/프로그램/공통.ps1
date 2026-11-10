@@ -172,7 +172,7 @@ function Get-ImageSections([string]$imagePart) {
     $headings = [regex]::Matches($imagePart,'(?m)^[ \t]*(?:#{1,4}[ \t]*)?(?<number>[1-4])[\.)][ \t]+[^\r\n]+[ \t]*$')
     if ($headings.Count -ne 4) { throw '이미지 프롬프트가 정확히 4개로 분리되지 않았습니다.' }
     $fileNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    $requiredPromptTerms = @('photorealistic','realistic editorial photography','natural lighting','high detail','professional composition','textless','no text','no letters','no numbers','no watermark','no logo')
+    $requiredPromptTerms = @('photorealistic','realistic editorial photography','natural lighting','high detail','professional composition','textless','no text','no letters','no numbers','no watermark','no AI-generated logos')
     for ($i = 0; $i -lt 4; $i++) {
         $number = [int]$headings[$i].Groups['number'].Value
         if ($number -ne ($i + 1)) { throw '이미지 프롬프트 번호가 1~4 순서가 아닙니다.' }

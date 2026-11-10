@@ -19,6 +19,10 @@ $existingContext=[IO.File]::ReadAllText($ExistingContextPath,[Text.Encoding]::UT
 $allowedRelatedUrls=@(Get-Content -LiteralPath $AllowedRelatedUrlsPath -Raw -Encoding UTF8|ConvertFrom-Json)
 $prompt=$writePrompt.TrimEnd()+"`n`n"+$existingContext+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
 $article=$null
+$imageRequestScript=Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '프로그램\이미지선행요청.ps1'
+if(-not(Test-Path -LiteralPath $imageRequestScript -PathType Leaf)){throw '기사 선택 직후 이미지 선행 요청기를 찾을 수 없습니다.'}
+$imageRequestResult=& $imageRequestScript -ItemPath $ItemPath -RunPath $RunPath|ConvertFrom-Json
+$imageRequestPath=[string]$imageRequestResult.requestPath
 function Get-RecoveryErrorCode([string]$Message){
     if($Message -match '사실|수치|날짜|기관|근거'){return 'FactValidation'}
     if($Message -match '출처|링크|URL|관련 글'){return 'SourceLinkStructure'}
@@ -31,7 +35,7 @@ function Save-RecoveryState([int]$Stage,[string]$Status,[int]$Attempt,[string]$E
         schemaVersion=1;number=[int]$item.Number;url=[string]$item.Url;currentStage=$Stage
         passedStages=$passedStages
         status=$Status;automaticRecoveryAttempt=$Attempt;errorCode=$ErrorCode
-        lastValidationMessage=$Message;updatedAt=(Get-Date).ToString('o')
+        lastValidationMessage=$Message;imageRequestPath=$imageRequestPath;updatedAt=(Get-Date).ToString('o')
     }) 8
 }
 Save-RecoveryState 4 'Recovering' 0

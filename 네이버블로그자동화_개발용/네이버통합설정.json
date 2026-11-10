@@ -32,6 +32,18 @@
     "ResumeFromLastStage": true,
     "ExposeIntermediateRecovery": false
   },
+  "ImageGenerationPerformance": {
+    "Provider": "ChatGPTBuiltInImageGeneration",
+    "StartImmediatelyAfterArticleSelection": true,
+    "RunInParallelWithArticleDraft": true,
+    "CreateRolePromptsBeforeArticleDraft": true,
+    "RefineRolePromptsAfterArticleDraft": true,
+    "RetryFailedImageOnly": true,
+    "PreserveSuccessfulImages": true,
+    "PreserveOriginals": true,
+    "AutoOptimizeAfterOriginalArrives": true,
+    "AutoResumeEditorPackageAfterImagesReady": true
+  },
   "Sources": [
     { "Name": "TechCrunch", "Home": "https://techcrunch.com", "Host": "techcrunch.com" },
     { "Name": "The Verge", "Home": "https://www.theverge.com", "Host": "theverge.com" },
@@ -87,9 +99,13 @@
     "InitialJpegQuality": 84,
     "MinimumJpegQuality": 68,
     "MaximumKilobytes": 450,
+    "MaximumPerceptualSimilarityPercent": 68,
     "RequireCentralSquareSafeArea": true,
     "ForbidEmbeddedText": true,
-    "ForbidLogosAndWatermarks": true,
+    "ForbidWatermarks": true,
+    "AllowVerifiedOfficialLogos": true,
+    "RequireOfficialLogoAsset": true,
+    "ForbidAiRenderedLogos": true,
     "Roles": [
       {
         "Order": 1,

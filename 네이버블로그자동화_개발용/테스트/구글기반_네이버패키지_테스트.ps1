@@ -20,7 +20,7 @@ try {
     Set-Content -LiteralPath (Join-Path $source 'Blogger에_붙여넣을_본문.html') -Value $html -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '메타데이터.txt') -Value "## 5. 해시태그`nAI, 데이터센터, 전력망, 에너지, 기술동향`n## 6. 내부 사실검증표" -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $source '사실검증표.md') -Value '검증 완료' -Encoding UTF8
-    $prompts = 1..4 | ForEach-Object { "### $_. 이미지 $_`n- 상세 영문 프롬프트: photorealistic editorial technology scene $_, textless, no text, no letters, no numbers, no watermark, no logo" }
+    $prompts = 1..4 | ForEach-Object { "### $_. 이미지 $_`n- 상세 영문 프롬프트: photorealistic editorial technology scene $_, textless, no text, no letters, no numbers, no watermark, no AI-generated logos" }
     Set-Content -LiteralPath (Join-Path $source '이미지_프롬프트.txt') -Value ($prompts -join "`n`n") -Encoding UTF8
     [pscustomobject]@{ RecommendedTitle='시험 제목'; Site='POWER Magazine'; Url='https://example.com/article'; Title='원문 제목' } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $source '작업정보.json') -Encoding UTF8
