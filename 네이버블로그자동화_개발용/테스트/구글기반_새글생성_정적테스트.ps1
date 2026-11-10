@@ -19,7 +19,11 @@ if ($startText -match 'NAVER_AUTOMATION_AUTO_SELECT_TOP|Select-Object\s+-First\s
 if ($startText -notmatch 'Read-CandidateSelection') { throw 'PowerShell 사용자 기사 선택 연결이 없습니다.' }
 if ($startText -notmatch 'Start-Job\s+-FilePath\s+\$workerPath' -or $startText -notmatch '\$maximumParallel=2') { throw '선택 글 최대 2건 병렬 생성 연결이 없습니다.' }
 if ($startText -notmatch '공통실행자료' -or $workerText -notmatch 'Resolve-ArticleWithFactCheckRepair') { throw '실행 공통자료 재사용 또는 글별 단계 복구가 없습니다.' }
-if ($text -notmatch 'Get-NaverGenerationResult' -or $text -notmatch 'selectedCount' -or $text -notmatch 'PartiallyCompleted' -or $text -notmatch 'RetryLatest') { throw '1~3건 독립 패키지·부분 성공·실패 재시도 연결이 없습니다.' }
+if ($text -notmatch 'Get-NaverGenerationResult' -or $text -notmatch 'selectedCount' -or $text -notmatch 'PartiallyCompleted' -or $text -notmatch 'automaticRecoveryAttempt') { throw '1~3건 독립 패키지·부분 성공·내부 자동복구 연결이 없습니다.' }
+if ($startText -notmatch '\$maximumAutomaticRecoveryPasses=3' -or $workerText -notmatch 'RecoveryStatePath' -or $workerText -notmatch 'Save-RecoveryState') { throw '글별 실패 단계 자동복구 상태 기록이 없습니다.' }
+foreach($activeText in @($text,$commonText,$startText,$workerText)){
+    if($activeText -match 'RetryLatest|Retry-LatestRun|Get-LatestRetryableRun|실패한 글만 다시 작성'){throw '수동 재시도 코드가 활성 생성 흐름에 남아 있습니다.'}
+}
 if ($text -notmatch '작업대기_' -or $text -notmatch '실행패키지\.json') { throw '복수 글 작업 대기 또는 재개 자료 저장 연결이 없습니다.' }
 $candidatePrompt = Get-Content -LiteralPath (Join-Path $root '구글기반\프롬프트\01_소재_URL_프롬프트.md') -Raw -Encoding UTF8
 if ($candidatePrompt -match '20일|30일|7→20') { throw '최근 7일을 넘기는 후보 확장 규칙이 남아 있습니다.' }

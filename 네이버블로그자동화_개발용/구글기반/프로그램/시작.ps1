@@ -1,4 +1,4 @@
-﻿param([switch]$NoWatcher,[switch]$CandidatePreview,[switch]$CachedOnly,[string]$SearchResponsePath,[switch]$AutoStart,[switch]$ImageStatusOnly,[switch]$PreflightOnly,[switch]$RetryLatest,[string]$RetryStatePath='')
+﻿param([switch]$NoWatcher,[switch]$CandidatePreview,[switch]$CachedOnly,[string]$SearchResponsePath,[switch]$AutoStart,[switch]$ImageStatusOnly,[switch]$PreflightOnly,[string]$ResumeStatePath='')
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '공통.ps1')
 . (Join-Path $PSScriptRoot '후보준비.ps1')
@@ -13,7 +13,6 @@ function Show-Preflight {
 }
 
 function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state) {
-    $writePrompt = [IO.File]::ReadAllText((Join-Path $script:PromptDir '02_최종_글쓰기_프롬프트.md'),[Text.Encoding]::UTF8)
     $existingPosts = @(Get-ExistingPosts)
     $existingPostContext = Format-ExistingPostContext $existingPosts
     $allowedRelatedUrls = @($existingPosts | ForEach-Object Url)
@@ -28,17 +27,26 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
     [IO.Directory]::CreateDirectory($sharedPath)|Out-Null
     [IO.File]::WriteAllText((Join-Path $sharedPath '기존글문맥.txt'),$existingPostContext,$script:Utf8)
     Write-JsonAtomic (Join-Path $sharedPath '관련글허용주소.json') @($allowedRelatedUrls) 5
-    $pending=@($selected)
+    $completedNumbers=@($completed|ForEach-Object {[int]$_.Number})
+    $pending=@($selected|Where-Object {[int]$_.Number -notin $completedNumbers})
     $maximumParallel=2
-    for($offset=0;$offset -lt $pending.Count;$offset+=$maximumParallel){
-        $batch=@($pending[$offset..([Math]::Min($offset+$maximumParallel-1,$pending.Count-1))])
+    $maximumAutomaticRecoveryPasses=3
+    $attempts=@{}
+    while($pending.Count -gt 0){
+        $take=[Math]::Min($maximumParallel,$pending.Count)
+        $batch=@($pending[0..($take-1)])
+        $pending=@($pending|Select-Object -Skip $take)
         $jobs=New-Object System.Collections.ArrayList
         foreach($item in $batch){
-            Write-Host ("{0}번 글을 작성하고 있습니다." -f $item.Number)
+            $key=[string][int]$item.Number
+            if(-not $attempts.ContainsKey($key)){$attempts[$key]=0}
+            $attempts[$key]=[int]$attempts[$key]+1
+            if($attempts[$key] -eq 1){Write-Host ("{0}번 글을 준비하고 있습니다." -f $item.Number)}
             $itemPath=Join-Path $sharedPath ('선택기사_{0}.json' -f [int]$item.Number)
-            $resultPath=Join-Path $sharedPath ('생성결과_{0}.clixml' -f [int]$item.Number)
+            $resultPath=Join-Path $sharedPath ('생성결과_{0}_{1}.clixml' -f [int]$item.Number,[int]$attempts[$key])
+            $recoveryStatePath=Join-Path $sharedPath ('글상태_{0}.json' -f [int]$item.Number)
             Write-JsonAtomic $itemPath $item 12
-            $job=Start-Job -FilePath $workerPath -ArgumentList @($commonPath,$promptPath,$itemPath,(Join-Path $sharedPath '기존글문맥.txt'),(Join-Path $sharedPath '관련글허용주소.json'),$run,$resultPath)
+            $job=Start-Job -FilePath $workerPath -ArgumentList @($commonPath,$promptPath,$itemPath,(Join-Path $sharedPath '기존글문맥.txt'),(Join-Path $sharedPath '관련글허용주소.json'),$run,$resultPath,$recoveryStatePath)
             [void]$jobs.Add([pscustomobject]@{Job=$job;Item=$item;ResultPath=$resultPath})
         }
         foreach($entry in @($jobs)){
@@ -56,14 +64,19 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
                 [void]$completed.Add([pscustomobject]@{Number=$item.Number;Path=$path;CompletedAt=(Get-Date).ToString('o')})
                 Write-Host "완료: $path"
             }catch{
-                $message="$($item.Number)번 소재 실패: $($_.Exception.Message)"
-                [void]$failed.Add([pscustomobject]@{Candidate=$item;Message=$message;FailedAt=(Get-Date).ToString('o')})
-                Write-ErrorLog $message
+                $message=$_.Exception.Message
+                $key=[string][int]$item.Number
+                Write-ErrorLog ("{0}번 글 내부 자동복구 {1}/{2}: {3}" -f $item.Number,$attempts[$key],$maximumAutomaticRecoveryPasses,$message)
+                if([int]$attempts[$key] -lt $maximumAutomaticRecoveryPasses){
+                    $pending+=@($item)
+                }else{
+                    [void]$failed.Add([pscustomobject]@{Candidate=$item;Message=$message;ErrorCode='AutomaticRecoveryExhausted';RecoveryAttempts=[int]$attempts[$key];FailedAt=(Get-Date).ToString('o')})
+                }
             }finally{
                 if($null -ne $entry.Job){Remove-Job -Job $entry.Job -Force -ErrorAction SilentlyContinue}
             }
             $state.Completed=@($completed);$state.Failed=@($failed)
-            $state.Status=if($failed.Count){'일부 실패'}else{'작성 중'}
+            $state.Status='글 작성 중'
             Save-RunState $run $state
         }
     }
@@ -72,8 +85,11 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
     if ($completed.Count) {
         $lastPath = [string]$completed[$completed.Count-1].Path
         if (-not $env:NAVER_AUTOMATION_NO_OPEN) { Invoke-Item (Split-Path $lastPath -Parent) }
-        Write-Host ("글 작성 결과: 완료 {0}건, 실패 {1}건. 각 글의 원본이미지 폴더에 이미지 4장을 넣으세요." -f $completed.Count,$failed.Count)
-    } else { Write-Host '완료된 글이 없습니다. 오류기록을 확인하세요.' -ForegroundColor Red }
+        Write-Host ("선택한 글 {0}건이 완성되었습니다." -f $completed.Count)
+    }
+    foreach($itemFailure in @($failed)){
+        Write-Host ("{0}번 글은 자동복구를 완료하지 못했습니다: {1}" -f $itemFailure.Candidate.Number,$itemFailure.Message) -ForegroundColor Red
+    }
 }
 
 function Start-Workflow {
@@ -115,15 +131,19 @@ function Start-Workflow {
     }
 }
 
-function Retry-LatestRun([string]$StatePath='') {
+function Resume-Workflow([string]$StatePath) {
     Assert-ProgramEnvironment | Out-Null
-    $run=if($StatePath){Split-Path -Parent ([IO.Path]::GetFullPath($StatePath))}else{Get-LatestRetryableRun}
-    if (-not $run) { Write-Host '재시도할 실패 작업이 없습니다.'; return }
-    if($StatePath -and -not(Test-Path -LiteralPath (Join-Path $run '작업상태.json') -PathType Leaf)){throw '지정한 실패 작업 상태를 찾을 수 없습니다.'}
+    $fullState=[IO.Path]::GetFullPath($StatePath)
+    $allowedRoot=[IO.Path]::GetFullPath($script:QueueDir).TrimEnd('\')+'\'
+    if(-not $fullState.StartsWith($allowedRoot,[StringComparison]::OrdinalIgnoreCase)){throw '자동 재개 상태가 작업대기 폴더 밖입니다.'}
+    if(-not(Test-Path -LiteralPath $fullState -PathType Leaf)){throw '자동 재개 상태 파일을 찾을 수 없습니다.'}
+    $run=Split-Path -Parent $fullState
     $state=Read-RunState $run
-    $selected=@($state.Failed|Where-Object {$null -ne $_.Candidate}|ForEach-Object Candidate)
-    if (-not $selected.Count) { Write-Host '글 작성 단계에서 재시도할 소재가 없습니다.'; return }
-    $state.Failed=@();$state.Status='재시도 중';Save-RunState $run $state
+    $completedNumbers=@($state.Completed|ForEach-Object{[int]$_.Number})
+    $selectedNumbers=@($state.SelectedNumbers|ForEach-Object{[int]$_})
+    $selected=@($state.Candidates|Where-Object{[int]$_.Number -in $selectedNumbers -and [int]$_.Number -notin $completedNumbers})
+    if(-not $selected.Count){return}
+    $state.Failed=@();$state.Status='글 작성 중';Save-RunState $run $state
     Invoke-SelectedArticles $run $selected $state
 }
 
@@ -151,7 +171,7 @@ function Show-ImageStatus {
     }
 }
 
-if($PreflightOnly){Show-Preflight;return};if($ImageStatusOnly){Show-ImageStatus;return};if($RetryLatest){Retry-LatestRun $RetryStatePath;return};if($CandidatePreview -or $AutoStart){Start-Workflow;return}
+if($PreflightOnly){Show-Preflight;return};if($ImageStatusOnly){Show-ImageStatus;return};if($ResumeStatePath){Resume-Workflow $ResumeStatePath;return};if($CandidatePreview -or $AutoStart){Start-Workflow;return}
 if(-not $NoWatcher){$watcher=Join-Path $PSScriptRoot '이미지_감시.ps1';Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$watcher+'"')) -WindowStyle Hidden|Out-Null}
-Write-Host '블로그 통합 자동화';Write-Host '명령: 시작 / 재시도 / 이미지 / 점검 / 종료'
-while($true){$answer=Read-Host '명령';if($null -eq $answer){break};$command=$answer.Trim();switch($command){'시작'{Start-Workflow};'재시도'{Retry-LatestRun};'이미지'{Show-ImageStatus};'점검'{Show-Preflight};'종료'{break};default{Write-Host '시작, 재시도, 이미지, 점검, 종료 중 하나를 입력하세요.'}};if($command -eq '종료'){break}}
+Write-Host '블로그 통합 자동화';Write-Host '명령: 시작 / 이미지 / 점검 / 종료'
+while($true){$answer=Read-Host '명령';if($null -eq $answer){break};$command=$answer.Trim();switch($command){'시작'{Start-Workflow};'이미지'{Show-ImageStatus};'점검'{Show-Preflight};'종료'{break};default{Write-Host '시작, 이미지, 점검, 종료 중 하나를 입력하세요.'}};if($command -eq '종료'){break}}

@@ -10,65 +10,64 @@ try {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('../프로그램/'+$name)) -Destination $program
     }
     @'
-param([switch]$NoWatcher,[switch]$AutoStart,[switch]$CachedOnly,[string]$SearchResponsePath,[switch]$RetryLatest,[string]$RetryStatePath='')
+param([switch]$NoWatcher,[switch]$AutoStart,[switch]$CachedOnly,[string]$SearchResponsePath,[string]$ResumeStatePath='')
+if(-not $NoWatcher){throw 'Named parameter binding failed'}
+if($ResumeStatePath){
+    $state=Get-Content -LiteralPath $ResumeStatePath -Raw -Encoding UTF8|ConvertFrom-Json
+    $candidate=@($state.Candidates|Where-Object Number -eq 7)[0]
+    $article=Join-Path $env:NAVER_AUTOMATION_RUNTIME_ROOT '작업완료/resumed'
+    $null=New-Item -ItemType Directory -Path $article -Force
+    'resumed fixture'|Set-Content -LiteralPath (Join-Path $article 'Blogger에_붙여넣을_본문.html')
+    $state.Status='글 작성 완료';$state.Completed=@(@{Number=7;Path=$article;Candidate=$candidate});$state.Failed=@()
+    $state|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $ResumeStatePath -Encoding UTF8
+    return
+}
+if(-not $AutoStart -or -not $CachedOnly -or $SearchResponsePath -ne 'fixture'){throw 'New-work named parameter binding failed'}
 $run=Join-Path $env:NAVER_AUTOMATION_RUNTIME_ROOT '작업대기/current'
 $null=New-Item -ItemType Directory -Path $run -Force
 $statePath=Join-Path $run '작업상태.json'
-if($RetryLatest){
-    if([IO.Path]::GetFullPath($RetryStatePath) -ne [IO.Path]::GetFullPath($statePath)){throw 'Exact retry state was not forwarded'}
-    $state=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
-    $candidate=@($state.Failed)[0].Candidate
-    $article=Join-Path $env:NAVER_AUTOMATION_RUNTIME_ROOT ('작업완료/'+[string]$candidate.Slug)
-    $null=New-Item -ItemType Directory -Path $article -Force
-    'fixture retry'|Set-Content -LiteralPath (Join-Path $article 'Blogger에_붙여넣을_본문.html')
-    $completed=@($state.Completed)+@(@{Path=$article;Candidate=$candidate})
-    @{Status='글 작성 완료';Failed=@();Completed=$completed}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $statePath -Encoding UTF8
-    return
-}
-if(-not $NoWatcher -or -not $AutoStart -or -not $CachedOnly -or $SearchResponsePath -ne 'fixture'){throw 'Named parameter binding failed'}
 $articles=@()
-foreach($name in @('third','first')){
-    $article=Join-Path $env:NAVER_AUTOMATION_RUNTIME_ROOT ('작업완료/'+$name)
+foreach($entry in @(@{name='third';number=3},@{name='first';number=10},@{name='second';number=12})){
+    $article=Join-Path $env:NAVER_AUTOMATION_RUNTIME_ROOT ('작업완료/'+$entry.name)
     $null=New-Item -ItemType Directory -Path $article -Force
     'fixture'|Set-Content -LiteralPath (Join-Path $article 'Blogger에_붙여넣을_본문.html')
-    $articles+=@{Path=$article;Candidate=@{Number=1;Title=$name;Slug=$name}}
+    $articles+=@{Path=$article;Candidate=@{Number=$entry.number;Title=$entry.name;Slug=$entry.name}}
 }
-@{Status='부분 완료';Failed=@(@{Candidate=@{Number=12;Title='second';Slug='second'};Message='fixture failure'});Completed=$articles}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $statePath -Encoding UTF8
+@{Status='글 작성 완료';Failed=@();Completed=$articles}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $statePath -Encoding UTF8
 '@ | Set-Content -LiteralPath (Join-Path $source '시작.ps1') -Encoding UTF8
     @'
 param($SourceArticlePath,$WorkRoot,$ContentId)
 $outputRoot=Join-Path $WorkRoot $ContentId
-$null=New-Item -ItemType Directory -Path $outputRoot -Force
 $leaf=Split-Path $SourceArticlePath -Leaf
 $failureMarker=Join-Path $WorkRoot 'first-package-failed-once.marker'
 if($leaf -eq 'first' -and -not(Test-Path -LiteralPath $failureMarker)){
+    $null=New-Item -ItemType Directory -Path $WorkRoot -Force
     'failed once'|Set-Content -LiteralPath $failureMarker
     throw 'fixture package failure'
 }
-@{source=$SourceArticlePath;outputRoot=$outputRoot;contentId=$ContentId;title=(Split-Path $SourceArticlePath -Leaf)}|ConvertTo-Json
+$null=New-Item -ItemType Directory -Path $outputRoot -Force
+@{source=$SourceArticlePath;outputRoot=$outputRoot;contentId=$ContentId;title=$leaf}|ConvertTo-Json
 '@ | Set-Content -LiteralPath (Join-Path $program '구글기반_네이버패키지.ps1') -Encoding UTF8
 
     $work=Join-Path $root '한글 작업'
     $result=& (Join-Path $program '구글기반_새글생성.ps1') -WorkRoot $work -CachedOnly -SearchResponsePath fixture|ConvertFrom-Json
     $packages=@($result.packages)
-    if($result.status -ne 'PartiallyCompleted' -or $result.completedCount -ne 1 -or $result.failedCount -ne 2 -or -not $result.canRetryFailed){throw 'Partial result was rejected'}
-    if($packages.Count -ne 1 -or $packages[0].source -notlike '*작업완료*third'){throw 'Completed package order was not preserved'}
+    if($result.status -ne 'Completed' -or $result.completedCount -ne 3 -or $result.failedCount -ne 0){throw 'Automatic package recovery did not complete all articles'}
+    if($null -ne $result.PSObject.Properties['canRetryFailed']){throw 'Manual retry property remains in the result'}
+    if($packages.Count -ne 3 -or $packages[0].source -notlike '*작업완료*third' -or $packages[1].source -notlike '*작업완료*first' -or $packages[2].source -notlike '*작업완료*second'){throw 'Selected article order was not preserved'}
+    if(-not(Test-Path -LiteralPath (Join-Path $work 'naver-editor-packages\first-package-failed-once.marker'))){throw 'Package recovery fixture did not fail once'}
     foreach($package in $packages){if($package.contentId -notlike 'NTE-*' -or -not(Test-Path -LiteralPath (Join-Path $package.outputRoot '실행패키지.json'))){throw 'Independent execution package was not saved'}}
-    $initialRoots=@($packages|ForEach-Object outputRoot)
     if(-not(Test-Path -LiteralPath $result.queueManifest)){throw 'Queue manifest was not saved'}
-
-    $retry=& (Join-Path $program '구글기반_새글생성.ps1') -WorkRoot $work -RetryLatest|ConvertFrom-Json
-    $retryPackages=@($retry.packages)
-    if($retry.status -ne 'Completed' -or $retry.completedCount -ne 3 -or $retry.failedCount -ne 0 -or $retry.canRetryFailed){throw 'Retry did not complete only the preserved failure'}
-    if($retryPackages.Count -ne 3 -or $retryPackages[1].source -notlike '*작업완료*first' -or $retryPackages[2].source -notlike '*작업완료*second'){throw 'Generation and package failures were not both retried'}
-    if($retryPackages[0].outputRoot -ne $initialRoots[0]){throw 'Completed packages were duplicated during retry'}
-    if($retry.runStatePath -ne $result.runStatePath){throw 'Retry created a new search run instead of resuming the failed state'}
-    if($retry.queueManifest -eq $result.queueManifest -or -not(Test-Path -LiteralPath $result.queueManifest)){throw 'Retry overwrote the previous queue manifest'}
-    $rejected=$false
-    try{$null=& (Join-Path $program '구글기반_새글생성.ps1') -WorkRoot $work -RetryLatest|ConvertFrom-Json}catch{$rejected=$_.Exception.Message -match '재시도할 실패 글이 없습니다'}
-    if(-not $rejected){throw 'A resolved old failure was offered for retry again'}
+    $queue=Get-Content -LiteralPath $result.queueManifest -Raw -Encoding UTF8|ConvertFrom-Json
+    if($queue.schemaVersion -ne 3 -or @($queue.packages).Count -ne 3){throw 'Automatic recovery queue manifest is invalid'}
+    $interruptedRoot=Join-Path $work 'google-runtime\작업대기\interrupted'
+    $null=New-Item -ItemType Directory -Path $interruptedRoot -Force
+    $interruptedPath=Join-Path $interruptedRoot '작업상태.json'
+    @{Status='글 작성 중';SelectedNumbers=@(7);Candidates=@(@{Number=7;Title='resumed';Slug='resumed'});Completed=@();Failed=@()}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $interruptedPath -Encoding UTF8
+    $resumed=& (Join-Path $program '구글기반_새글생성.ps1') -WorkRoot $work -CachedOnly -SearchResponsePath fixture|ConvertFrom-Json
+    if($resumed.status -ne 'Completed' -or $resumed.completedCount -ne 1 -or @($resumed.packages)[0].source -notlike '*작업완료*resumed'){throw 'Interrupted run did not resume from its saved state'}
     if($env:NAVER_AUTOMATION_RUNTIME_ROOT -ne $oldRuntime){throw 'Runtime environment leaked'}
-    'New-work wrapper integration tests: PASS (partial success and failed-only retry, no browser)'
+    'New-work wrapper integration tests: PASS (automatic failed-stage recovery, no manual retry, no browser)'
 } finally {
     if([IO.Path]::GetFullPath($root).StartsWith([IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){Remove-Item -LiteralPath $root -Recurse -Force}
 }

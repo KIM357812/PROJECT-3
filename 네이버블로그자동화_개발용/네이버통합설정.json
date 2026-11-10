@@ -24,7 +24,11 @@
     "ReuseRunContext": true,
     "RetryFailedStageOnly": true,
     "PreserveCompletedPackages": true,
-    "AutoRepairImageDerivatives": true
+    "AutoRepairImageDerivatives": true,
+    "MaximumAutomaticRecoveryPasses": 3,
+    "ManualRetryUi": false,
+    "ResumeFromLastStage": true,
+    "ExposeIntermediateRecovery": false
   },
   "Naver": {
     "BlogId": "ij1128",

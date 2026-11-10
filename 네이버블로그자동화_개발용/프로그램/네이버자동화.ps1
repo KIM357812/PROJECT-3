@@ -74,26 +74,18 @@ function Set-GenerationQueue($Generated) {
         [void]$queueList.Items.Add([pscustomobject]@{
             display = ('완성 {0}/{1} | {2}' -f $order,$packages.Count,[string]$package.title)
             package = $package
-            retryRequired = $false
-        })
-    }
-    foreach ($failure in $failures) {
-        $number = if ($null -ne $failure.number) { [string]$failure.number } else { '-' }
-        $titleText = if ([string]::IsNullOrWhiteSpace([string]$failure.title)) { '제목 확인 불가' } else { [string]$failure.title }
-        [void]$queueList.Items.Add([pscustomobject]@{
-            display = ('재시도 필요 | {0}번 | {1}' -f $number,$titleText)
-            package = $null
-            retryRequired = $true
         })
     }
     if ($queueList.Items.Count -gt 0) { $queueList.SelectedIndex = 0 }
     $queueRunButton.Enabled = ($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package)
     if ($packages.Count -gt 0 -and $failures.Count -gt 0) {
-        $result.Text = "부분 완료: 완성 글 $($packages.Count)건은 바로 사용할 수 있고, 실패 글 $($failures.Count)건은 별도 재시도할 수 있습니다.`r`n기사 재검색이나 번호 재선택은 필요하지 않습니다."
+        $details=@($failures|ForEach-Object{('{0}번: {1}' -f $(if($null -ne $_.number){$_.number}else{'-'}),$_.message)}) -join ' / '
+        $result.Text = "완성 글 $($packages.Count)건을 준비했습니다.`r`n자동복구 불가 $($failures.Count)건: $details"
     } elseif ($packages.Count -gt 0) {
-        $result.Text = "완성 글 $($packages.Count)건을 준비했습니다. 원하는 글부터 편집기에 넣으세요.`r`n발행 설정은 열지 않습니다."
+        $result.Text = "선택한 글 $($packages.Count)건이 모두 완성되었습니다. 원하는 글부터 편집기에 넣으세요.`r`n발행 설정은 열지 않습니다."
     } else {
-        $result.Text = "완성 글은 없고 실패 글 $($failures.Count)건이 보존되었습니다. '실패한 글만 다시 작성'을 누르세요.`r`n기사 재검색이나 번호 재선택은 필요하지 않습니다."
+        $details=@($failures|ForEach-Object{('{0}번: {1}' -f $(if($null -ne $_.number){$_.number}else{'-'}),$_.message)}) -join ' / '
+        $result.Text = "자동으로 해결할 수 없는 글 $($failures.Count)건을 준비하지 않았습니다.`r`n$details"
     }
 }
 
@@ -145,15 +137,10 @@ $generateButton.Text = '최신 기사로 새 글 만들기'
 $generateButton.Location = New-Object Drawing.Point(25,180)
 $generateButton.Size = New-Object Drawing.Size(240,42)
 $form.Controls.Add($generateButton)
-$retryButton = New-Object Windows.Forms.Button
-$retryButton.Text = '실패한 글만 다시 작성'
-$retryButton.Location = New-Object Drawing.Point(290,180)
-$retryButton.Size = New-Object Drawing.Size(240,42)
-$form.Controls.Add($retryButton)
 $resumeButton = New-Object Windows.Forms.Button
 $resumeButton.Text = '완성 글 편집기 입력 계속'
-$resumeButton.Location = New-Object Drawing.Point(555,180)
-$resumeButton.Size = New-Object Drawing.Size(220,42)
+$resumeButton.Location = New-Object Drawing.Point(290,180)
+$resumeButton.Size = New-Object Drawing.Size(240,42)
 $form.Controls.Add($resumeButton)
 $resumeButton.Add_Click({
     $dialog=New-Object Windows.Forms.OpenFileDialog
@@ -161,11 +148,11 @@ $resumeButton.Add_Click({
     $dialog.Title='이어서 실행할 네이버 작업 자료 선택'
     try {
         if($dialog.ShowDialog() -ne [Windows.Forms.DialogResult]::OK){return}
-        $generateButton.Enabled=$false;$retryButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
         $package=Get-Content -LiteralPath $dialog.FileName -Raw -Encoding UTF8 | ConvertFrom-Json
         Invoke-EditorPipeline $package
     } catch {$result.Text='미완료: '+$_.Exception.Message;Show-Error $_.Exception.Message}
-    finally {$generateButton.Enabled=$true;$retryButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package);$dialog.Dispose()}
+    finally {$generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package);$dialog.Dispose()}
 })
 
 $queueLabel = New-Object Windows.Forms.Label
@@ -189,14 +176,14 @@ $queueRunButton.Add_Click({
     if ($null -eq $queueList.SelectedItem) { return }
     $entry = $queueList.SelectedItem
     try {
-        if ($null -eq $entry.package) { throw "이 항목은 아직 완성되지 않았습니다. '실패한 글만 다시 작성'을 먼저 누르세요." }
-        $generateButton.Enabled=$false;$retryButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        if ($null -eq $entry.package) { throw '완성 패키지가 없는 항목은 편집기에 입력할 수 없습니다.' }
+        $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
         Invoke-EditorPipeline $entry.package
         $index = $queueList.SelectedIndex
         $queueList.Items.RemoveAt($index)
         if ($queueList.Items.Count -gt 0) { $queueList.SelectedIndex = [Math]::Min($index,$queueList.Items.Count-1) }
     } catch { $result.Text='미완료: '+$_.Exception.Message;Show-Error $_.Exception.Message }
-    finally {$generateButton.Enabled=$true;$retryButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package)}
+    finally {$generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package)}
 })
 
 $resultLabel = New-Object Windows.Forms.Label
@@ -232,29 +219,20 @@ $connectionButton.Add_Click({
 })
 
 $workBrowse.Add_Click({ $selected=Select-Folder '저장소 밖의 네이버 작업 폴더를 선택하세요.'; if($selected){$workText.Text=$selected} })
-$retryButton.Add_Click({
-    try {
-        $generateButton.Enabled=$false;$retryButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
-        $result.Text='보존된 실패 글만 다시 작성합니다. 기사 재검색과 번호 재선택은 실행하지 않습니다.';$form.Refresh()
-        $generated = & $newArticlePath -WorkRoot $workText.Text -RetryLatest | ConvertFrom-Json
-        Set-GenerationQueue $generated
-    } catch { $result.Text='재시도 미완료: '+$_.Exception.Message; Show-Error $_.Exception.Message }
-    finally { $generateButton.Enabled=$true;$retryButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package) }
-})
 $generateButton.Add_Click({
     try {
-        $generateButton.Enabled=$false;$retryButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
-        $result.Text='최근 7일 기사 수집 후 PowerShell에서 선택한 1~3건을 작성합니다.';$form.Refresh()
+        $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        $result.Text='선택한 글을 준비하고 있습니다.';$form.Refresh()
         $generated = & $newArticlePath -WorkRoot $workText.Text | ConvertFrom-Json
         if (@($generated.packages).Count -gt 3) { throw '이번 작업에서 준비된 글 수가 최대 3건을 초과했습니다.' }
         Set-GenerationQueue $generated
     } catch { $result.Text='미완료: '+$_.Exception.Message; Show-Error $_.Exception.Message }
-    finally { $generateButton.Enabled=$true;$retryButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package) }
+    finally { $generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package) }
 })
 
 if ($LayoutSelfTest) {
     $form.PerformLayout()
-    foreach($control in @($title,$notice,$stopNotice,$workLabel,$workText,$workBrowse,$generateButton,$retryButton,$resumeButton,$queueLabel,$queueList,$queueRunButton,$connectionButton,$resultLabel,$result)) {
+    foreach($control in @($title,$notice,$stopNotice,$workLabel,$workText,$workBrowse,$generateButton,$resumeButton,$queueLabel,$queueList,$queueRunButton,$connectionButton,$resultLabel,$result)) {
         if(-not $form.ClientRectangle.Contains($control.Bounds)){throw "화면 요소가 창을 벗어났습니다: $($control.Text)"}
     }
     $form.Dispose();Write-Output 'Naver integrated automation layout self-test passed.';return

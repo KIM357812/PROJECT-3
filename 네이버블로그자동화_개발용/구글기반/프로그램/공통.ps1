@@ -64,18 +64,6 @@ function Read-RunState([string]$run) {
     return [IO.File]::ReadAllText($path,[Text.Encoding]::UTF8) | ConvertFrom-Json
 }
 
-function Get-LatestRetryableRun {
-    foreach ($folder in @(Get-ChildItem -LiteralPath $script:PendingDir -Directory -Filter '글작성_*' | Sort-Object LastWriteTime -Descending)) {
-        $statePath = Join-Path $folder.FullName '작업상태.json'
-        if (-not [IO.File]::Exists($statePath)) { continue }
-        try {
-            $state = Read-RunState $folder.FullName
-            if (@($state.Failed | Where-Object { $null -ne $_.Candidate }).Count -gt 0) { return $folder.FullName }
-        } catch { Write-ErrorLog ('재시도 상태 읽기 실패: '+$_.Exception.Message) }
-    }
-    return $null
-}
-
 function Test-ProgramEnvironment([switch]$RequireBrowser) {
     $checks = New-Object System.Collections.Generic.List[object]
     $add = {

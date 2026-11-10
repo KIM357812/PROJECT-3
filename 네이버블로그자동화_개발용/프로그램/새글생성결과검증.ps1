@@ -33,7 +33,7 @@ function Get-NaverGenerationResult {
 function Get-NaverGeneratedArticles {
     param([string]$RuntimeRoot, [string[]]$PreviousRuns=@(), [string]$StatePath='')
     $result = Get-NaverGenerationResult -RuntimeRoot $RuntimeRoot -PreviousRuns $PreviousRuns -StatePath $StatePath
-    if ($result.completedCount -lt 1) { throw '이번 새 글 생성에서 완성된 글이 없습니다. 실패한 글만 다시 작성하십시오.' }
+    if ($result.completedCount -lt 1) { throw '이번 새 글 생성에서 완성된 글이 없습니다. 자동복구 불가 원인을 확인하십시오.' }
     return @($result.completedPaths)
 }
 

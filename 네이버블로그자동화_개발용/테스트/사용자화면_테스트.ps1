@@ -10,9 +10,9 @@ $text = Get-Content -LiteralPath $uiScript -Raw -Encoding UTF8
 foreach ($required in @(
     '최근 7일 기사를 확인',
     '최신 기사로 새 글 만들기',
-    '실패한 글만 다시 작성',
     '완성 글 편집기 입력 계속',
-    '기사 재검색이나 번호 재선택은 필요하지 않습니다',
+    '선택한 글을 준비하고 있습니다.',
+    '모두 완성되었습니다',
     '준비된 글',
     '선택한 글 편집기에 넣기',
     '편집기입력완료.json',
@@ -28,7 +28,7 @@ foreach ($required in @(
 )) {
     if ($text.IndexOf($required,[StringComparison]::Ordinal) -lt 0) { throw "사용자 화면 필수 항목이 없습니다: $required" }
 }
-foreach ($removed in @('Google 완성 글 가져오기','Google 완성 글 폴더를 선택하세요.')) {
+foreach ($removed in @('Google 완성 글 가져오기','Google 완성 글 폴더를 선택하세요.','실패한 글만 다시 작성','retryButton','RetryLatest','재시도 필요','기사 다시 선택','전체 작업 다시 시작','내부 사실검증표 부족','소재 실패')) {
     if ($text.IndexOf($removed,[StringComparison]::Ordinal) -ge 0) { throw "제거 대상 화면 문구가 남아 있습니다: $removed" }
 }
 foreach($removed in @('데스크톱연결요청.ps1','DesktopConnectionSettingsPath','codex queue')){

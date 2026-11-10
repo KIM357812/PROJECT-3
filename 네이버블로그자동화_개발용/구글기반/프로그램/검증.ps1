@@ -12,17 +12,15 @@ foreach ($name in @('프롬프트','프로그램','작업대기','작업완료',
 $results.Add('폴더 자동 생성: 통과')
 
 $stateRun=New-RunDirectory '글작성'
-$state=[pscustomobject]@{Status='작성 중';UpdatedAt='';Completed=@();Failed=@([pscustomobject]@{Candidate=[pscustomobject]@{Number=1;Title='재시도 시험';Site='TechCrunch';Url='https://techcrunch.com/2026/09/30/retry-test/';Details='시험'};Message='의도한 시험 실패'})}
+$state=[pscustomobject]@{Status='작성 중';UpdatedAt='';CurrentStage=4;PassedStages=@(1,2,3);FailureCode='HtmlStructure';AutomaticRecoveryAttempt=1;Completed=@();Failed=@()}
 Save-RunState $stateRun $state
-$state.Status='일부 실패';Save-RunState $stateRun $state
 $loaded=Read-RunState $stateRun
-Assert ($loaded.Status -eq '일부 실패' -and @($loaded.Failed).Count -eq 1) '작업상태 원자 저장·읽기'
-Assert ((Get-LatestRetryableRun) -eq $stateRun) '최근 실패 작업 찾기'
-$searchFailureRun=New-RunDirectory '글작성'
-$searchFailureState=[pscustomobject]@{Status='실패';UpdatedAt='';Completed=@();Failed=@([pscustomobject]@{Candidate=$null;Message='소재 검색 시험 실패'})}
-Save-RunState $searchFailureRun $searchFailureState
-Assert ((Get-LatestRetryableRun) -eq $stateRun) '후보 없는 소재 검색 실패를 글 재시도에서 제외'
-$results.Add('작업상태 저장·실패 재시도 대상 탐색: 통과')
+Assert ($loaded.CurrentStage -eq 4 -and $loaded.AutomaticRecoveryAttempt -eq 1) '실패 단계 자동복구 상태 저장'
+$state.Status='완료';$state.CurrentStage=9;$state.PassedStages=@(1,2,3,4,5,6,7,8,9);$state.FailureCode=''
+Save-RunState $stateRun $state
+$loaded=Read-RunState $stateRun
+Assert ($loaded.Status -eq '완료' -and $loaded.CurrentStage -eq 9) '자동복구 완료 상태 저장'
+$results.Add('작업상태 저장·단계 자동복구 기록: 통과')
 
 $sample = @'
 1번. 한글 소재 하나
