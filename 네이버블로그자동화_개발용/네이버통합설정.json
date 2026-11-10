@@ -42,7 +42,9 @@
     "PreserveSuccessfulImages": true,
     "PreserveOriginals": true,
     "AutoOptimizeAfterOriginalArrives": true,
-    "AutoResumeEditorPackageAfterImagesReady": true
+    "AutoResumeEditorPackageAfterImagesReady": true,
+    "MaximumParallelImages": 2,
+    "StartBeforeArticleDraft": true
   },
   "Sources": [
     { "Name": "TechCrunch", "Home": "https://techcrunch.com", "Host": "techcrunch.com" },

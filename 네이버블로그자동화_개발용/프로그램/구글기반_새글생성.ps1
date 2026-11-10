@@ -79,6 +79,8 @@ $previousNoOpen = $env:NAVER_AUTOMATION_NO_OPEN
 $previousCompletionDirectory = $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY
 $previousCompletionPackager = $env:NAVER_AUTOMATION_COMPLETION_PACKAGER
 $previousNaverWorkRoot = $env:NAVER_AUTOMATION_NAVER_WORK_ROOT
+$previousImageDispatcher = $env:NAVER_AUTOMATION_IMAGE_DISPATCHER
+$defaultImageDispatcher=Join-Path $PSScriptRoot '이미지ChatGPT실행부.ps1'
 $interruptedStatePath=Get-InterruptedGenerationState $runtimeRoot
 $previousRuns = @(Get-ChildItem -LiteralPath (Join-Path $runtimeRoot '작업대기') -Filter '작업상태.json' -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object FullName)
 try {
@@ -87,6 +89,9 @@ try {
     $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY = if([string]::IsNullOrWhiteSpace($ProgressDirectory)){''}else{[IO.Path]::GetFullPath($ProgressDirectory)}
     $env:NAVER_AUTOMATION_COMPLETION_PACKAGER = if([string]::IsNullOrWhiteSpace($ProgressDirectory)){''}else{Join-Path $PSScriptRoot '완성글_증분패키지.ps1'}
     $env:NAVER_AUTOMATION_NAVER_WORK_ROOT = $naverWorkRoot
+    if([string]::IsNullOrWhiteSpace($env:NAVER_AUTOMATION_IMAGE_DISPATCHER)){
+        $env:NAVER_AUTOMATION_IMAGE_DISPATCHER=$defaultImageDispatcher
+    }
     $arguments = @{NoWatcher=$true}
     if($interruptedStatePath){$arguments.ResumeStatePath=$interruptedStatePath}else{$arguments.AutoStart=$true}
     if ($CachedOnly -and -not $interruptedStatePath) { $arguments.CachedOnly = $true }
@@ -170,4 +175,5 @@ if(-not [string]::IsNullOrWhiteSpace($ResultPath)){
     if(-not(Test-Path -LiteralPath $resultParent -PathType Container)){New-Item -ItemType Directory -Path $resultParent -Force|Out-Null}
     [IO.File]::WriteAllText($resultFull,$queueJson,(New-Object Text.UTF8Encoding($false)))
 }
+$env:NAVER_AUTOMATION_IMAGE_DISPATCHER=$previousImageDispatcher
 $queueJson
