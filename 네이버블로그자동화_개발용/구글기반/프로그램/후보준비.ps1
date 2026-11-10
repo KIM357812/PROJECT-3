@@ -110,7 +110,7 @@ function Get-LocalCandidates([switch]$Refresh, [switch]$CachedOnly) {
         if (-not $definition.Count) { continue }
         foreach ($item in @($result.Candidates)) {
             $url = Normalize-ArticleUrl $item.Url 'https://example.com'
-            if ($url -and (Test-ArticleHost $url $definition[0].Host) -and $seen.Add($url)) { [void]$candidates.Add($item) }
+            if ($url -and (Test-ArticleDefinition $url $definition[0]) -and $seen.Add($url)) { [void]$candidates.Add($item) }
         }
     }
     return [pscustomobject]@{ Cached=$cached; Results=@($results); Candidates=@($candidates.ToArray()); CachePath=$cachePath }
@@ -118,6 +118,10 @@ function Get-LocalCandidates([switch]$Refresh, [switch]$CachedOnly) {
 
 function New-CandidateSearchPrompt([string]$basePrompt,[object]$prepared) {
     $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('')
+    $lines.Add('## 이번 실행에서 설정된 전문 매체 목록')
+    $lines.Add(('아래 {0}개 매체가 이번 실행의 유일한 지정 매체입니다. 프롬프트 본문의 예시 목록과 다르면 이 목록을 우선하십시오.' -f @($script:Sources).Count))
+    foreach ($source in $script:Sources) { $lines.Add(('- {0}: {1}' -f $source.Name,$source.Home)) }
     if (-not $prepared -or @($prepared.Candidates).Count -eq 0) {
         $lines.Add('공개 자료 후보가 없어 기존 웹 검색으로 부족한 소재를 찾으십시오.')
         return $basePrompt.TrimEnd()+"`n`n"+($lines -join "`n")+"`n"

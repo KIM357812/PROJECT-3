@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkRoot,
     [switch]$CachedOnly,
-    [string]$SearchResponsePath
+    [string]$SearchResponsePath,
+    [string]$ProgressDirectory,
+    [string]$ResultPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,7 +49,7 @@ function Get-InterruptedGenerationState([string]$RuntimeRoot) {
     foreach($file in @(Get-ChildItem -LiteralPath (Join-Path $RuntimeRoot '작업대기') -Filter '작업상태.json' -Recurse -File -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending)){
         try{
             $state=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8|ConvertFrom-Json
-            if([string]$state.Status -eq '글 작성 중' -and @($state.SelectedNumbers).Count -gt @($state.Completed).Count){return $file.FullName}
+            if([string]$state.Status -in @('글 작성 중','실패','일부 실패') -and @($state.SelectedNumbers).Count -gt @($state.Completed).Count){return $file.FullName}
         }catch{}
     }
     return ''
@@ -74,11 +76,17 @@ foreach ($directory in @($runtimeRoot,$naverWorkRoot)) {
 
 $previousRuntime = $env:NAVER_AUTOMATION_RUNTIME_ROOT
 $previousNoOpen = $env:NAVER_AUTOMATION_NO_OPEN
+$previousCompletionDirectory = $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY
+$previousCompletionPackager = $env:NAVER_AUTOMATION_COMPLETION_PACKAGER
+$previousNaverWorkRoot = $env:NAVER_AUTOMATION_NAVER_WORK_ROOT
 $interruptedStatePath=Get-InterruptedGenerationState $runtimeRoot
 $previousRuns = @(Get-ChildItem -LiteralPath (Join-Path $runtimeRoot '작업대기') -Filter '작업상태.json' -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object FullName)
 try {
     $env:NAVER_AUTOMATION_RUNTIME_ROOT = $runtimeRoot
     $env:NAVER_AUTOMATION_NO_OPEN = '1'
+    $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY = if([string]::IsNullOrWhiteSpace($ProgressDirectory)){''}else{[IO.Path]::GetFullPath($ProgressDirectory)}
+    $env:NAVER_AUTOMATION_COMPLETION_PACKAGER = if([string]::IsNullOrWhiteSpace($ProgressDirectory)){''}else{Join-Path $PSScriptRoot '완성글_증분패키지.ps1'}
+    $env:NAVER_AUTOMATION_NAVER_WORK_ROOT = $naverWorkRoot
     $arguments = @{NoWatcher=$true}
     if($interruptedStatePath){$arguments.ResumeStatePath=$interruptedStatePath}else{$arguments.AutoStart=$true}
     if ($CachedOnly -and -not $interruptedStatePath) { $arguments.CachedOnly = $true }
@@ -88,6 +96,9 @@ try {
 finally {
     $env:NAVER_AUTOMATION_RUNTIME_ROOT = $previousRuntime
     $env:NAVER_AUTOMATION_NO_OPEN = $previousNoOpen
+    $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY = $previousCompletionDirectory
+    $env:NAVER_AUTOMATION_COMPLETION_PACKAGER = $previousCompletionPackager
+    $env:NAVER_AUTOMATION_NAVER_WORK_ROOT = $previousNaverWorkRoot
 }
 
 $generation = if($interruptedStatePath){Get-NaverGenerationResult -RuntimeRoot $runtimeRoot -StatePath $interruptedStatePath}else{Get-NaverGenerationResult -RuntimeRoot $runtimeRoot -PreviousRuns $previousRuns}
@@ -152,4 +163,11 @@ $queue = [pscustomobject]@{
 $queuePath = Join-Path $naverWorkRoot ('작업대기_{0}_{1}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmssfff'),[guid]::NewGuid().ToString('N').Substring(0,6))
 Write-JsonAtomic $queuePath $queue 15
 $queue | Add-Member -NotePropertyName queueManifest -NotePropertyValue $queuePath
-$queue | ConvertTo-Json -Depth 15
+$queueJson=$queue | ConvertTo-Json -Depth 15
+if(-not [string]::IsNullOrWhiteSpace($ResultPath)){
+    $resultFull=[IO.Path]::GetFullPath($ResultPath)
+    $resultParent=Split-Path -Parent $resultFull
+    if(-not(Test-Path -LiteralPath $resultParent -PathType Container)){New-Item -ItemType Directory -Path $resultParent -Force|Out-Null}
+    [IO.File]::WriteAllText($resultFull,$queueJson,(New-Object Text.UTF8Encoding($false)))
+}
+$queueJson

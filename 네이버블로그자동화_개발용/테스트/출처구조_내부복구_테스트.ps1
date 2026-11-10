@@ -23,6 +23,9 @@ try {
     $sourceContent = [regex]::Match($repaired,'(?is)<div\b(?=[^>]*data-blog-sources="true")[^>]*>(?<content>[\s\S]*?)</div>').Groups['content'].Value
     Assert-True ([regex]::Matches($sourceContent,'(?is)<a\b').Count -eq 1) '관련 글 링크를 출처 링크 수에서 제외'
     Assert-True ([regex]::Matches($repaired,'data-blog-related="true"').Count -eq 1) '관련 글 영역 중복 없음'
+    $withoutGeneratedRelated = Remove-GeneratedRelatedPosts $repaired
+    Assert-True ($withoutGeneratedRelated -notmatch 'data-blog-related|example\.com/related|관련 분석') 'AI 생성 관련 글을 본문 검증 전에 제거'
+    Assert-True ($withoutGeneratedRelated -match 'data-blog-sources="true"') '관련 글 제거 후 출처 보존'
 
     $commonSource = [IO.File]::ReadAllText($commonPath,[Text.Encoding]::UTF8)
     $startSource = [IO.File]::ReadAllText($startPath,[Text.Encoding]::UTF8)
@@ -30,8 +33,8 @@ try {
     Assert-True ($commonSource -notmatch "Write-Host '내부 사실검증표가 부족") '내부 사실검증 보완 문구를 사용자 화면에 표시하지 않음'
     Assert-True ($commonSource -match 'for \(\$attempt=0; \$attempt -le 3; \$attempt\+\+\)') '내부 사실검증 반복 보완'
     Assert-True ($commonSource -match '\$currentResponse = \$originalPublic \+ "`n`n" \+ \$repairedFact') '보완 결과에서 공개 영역을 원문으로 강제 보존'
-    Assert-True ($workerSource -match 'for\(\$generationAttempt=1;\$generationAttempt -le 3;\$generationAttempt\+\+\)') '유효 기사 전체 생성 반복 검증'
-    Assert-True ($workerSource -match '소재를 버리지 말고 정해진 출력 구조를 정확히 고쳐') '형식 실패 시 기사 폐기 대신 재생성'
+    Assert-True ($workerSource -notmatch 'for\(\$generationAttempt=1;\$generationAttempt -le 3;\$generationAttempt\+\+\)') '전체 글 반복 생성 제거'
+    Assert-True ($commonSource -match 'Remove-GeneratedRelatedPosts') '관련 글은 실제 게시물 목록 단계에서 별도 선정'
 
     Write-Output 'Source structure and silent internal repair regression tests passed.'
 } finally {

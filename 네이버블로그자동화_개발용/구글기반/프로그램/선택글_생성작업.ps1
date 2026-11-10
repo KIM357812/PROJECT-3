@@ -19,7 +19,6 @@ $existingContext=[IO.File]::ReadAllText($ExistingContextPath,[Text.Encoding]::UT
 $allowedRelatedUrls=@(Get-Content -LiteralPath $AllowedRelatedUrlsPath -Raw -Encoding UTF8|ConvertFrom-Json)
 $prompt=$writePrompt.TrimEnd()+"`n`n"+$existingContext+"`n`n"+$item.Details+"`n`n기사 원문 URL: "+$item.Url+"`n"
 $article=$null
-$lastValidationMessage=''
 function Get-RecoveryErrorCode([string]$Message){
     if($Message -match '사실|수치|날짜|기관|근거'){return 'FactValidation'}
     if($Message -match '출처|링크|URL|관련 글'){return 'SourceLinkStructure'}
@@ -35,28 +34,26 @@ function Save-RecoveryState([int]$Stage,[string]$Status,[int]$Attempt,[string]$E
         lastValidationMessage=$Message;updatedAt=(Get-Date).ToString('o')
     }) 8
 }
-Save-RecoveryState 4 'Running' 0
-for($generationAttempt=1;$generationAttempt -le 3;$generationAttempt++){
-    Save-RecoveryState 4 'Recovering' $generationAttempt (Get-RecoveryErrorCode $lastValidationMessage) $lastValidationMessage
-    $attemptPrompt=$prompt
-    if($lastValidationMessage){
-        $attemptPrompt+="`n이전 생성 결과는 다음 자동 검증을 통과하지 못했습니다: $lastValidationMessage`n기사와 원문은 유효하므로 소재를 버리지 말고 정해진 출력 구조를 정확히 고쳐 전체 글을 다시 생성하세요.`n"
-    }
-    $stamp=Get-Date -Format 'yyyyMMdd_HHmmss_fff'
-    $rawPath=Join-Path $RunPath ('{0:D2}_글쓰기_원본_{1}_{2}.txt' -f ([int]$item.Number),$stamp,$generationAttempt)
-    $response=Invoke-Codex $attemptPrompt $rawPath
-    $repairPath=Join-Path $RunPath ('{0:D2}_사실검증보완_{1}_{2}.txt' -f ([int]$item.Number),$stamp,$generationAttempt)
-    try{
-        $article=Resolve-ArticleWithFactCheckRepair $response $item.Site $item.Url $allowedRelatedUrls $repairPath
-        break
-    }catch{
-        $lastValidationMessage=$_.Exception.Message
-        Write-ErrorLog ("{0}번 글 내부 자동복구 {1}/3: {2}" -f $item.Number,$generationAttempt,$lastValidationMessage)
-        if($generationAttempt -ge 3){
-            Save-RecoveryState 4 'Unresolved' $generationAttempt (Get-RecoveryErrorCode $lastValidationMessage) $lastValidationMessage
-            throw
-        }
-    }
+Save-RecoveryState 4 'Recovering' 0
+$generationAttempt=1
+$stamp=Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+$rawPath=Join-Path $RunPath ('{0:D2}_글쓰기_원본_{1}.txt' -f ([int]$item.Number),$stamp)
+$response=Invoke-Codex $prompt $rawPath
+$hasArticleEnvelope=($response -match '(?is)<div\b' -and $response -match '(?m)^## 1\. SEO 키워드 분석\s*$' -and $response -match '(?m)^## 5\. 해시태그\s*$')
+if(-not $hasArticleEnvelope){
+    $generationAttempt=2
+    Save-RecoveryState 4 'Recovering' $generationAttempt 'ModelContract' '콘텐츠 생성 응답 형식이 아니므로 같은 생성 단계만 한 번 다시 실행합니다.'
+    $retryPrompt=$prompt+"`n`n중요: 이 요청은 소프트웨어 개발이나 브라우저 조작이 아닙니다. 파일을 읽거나 프로그램을 수정하지 말고, 위 출력 형식의 블로그 글 본문과 메타데이터만 응답하세요."
+    $rawPath=Join-Path $RunPath ('{0:D2}_글쓰기_원본_{1}_형식복구.txt' -f ([int]$item.Number),$stamp)
+    $response=Invoke-Codex $retryPrompt $rawPath
+}
+$repairPath=Join-Path $RunPath ('{0:D2}_사실검증보완_{1}.txt' -f ([int]$item.Number),$stamp)
+try {
+    $article=Resolve-ArticleWithFactCheckRepair $response $item.Site $item.Url $allowedRelatedUrls $repairPath
+} catch {
+    $message=$_.Exception.Message
+    Save-RecoveryState 4 'Unresolved' 1 (Get-RecoveryErrorCode $message) $message
+    throw
 }
 if($null -eq $article){throw '유효한 기사 글의 자동 생성과 재검증을 완료하지 못했습니다.'}
 $article|Export-Clixml -LiteralPath $ResultPath -Depth 20 -Encoding UTF8

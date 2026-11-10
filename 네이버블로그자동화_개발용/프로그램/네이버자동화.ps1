@@ -16,6 +16,7 @@ $requiredPaths = @(
     (Join-Path $googleRoot '프롬프트\02_최종_글쓰기_프롬프트.md'),
     (Join-Path $googleRoot '프롬프트\03_이미지_생성_프롬프트.md'),
     $newArticlePath,$packagePath,(Join-Path $PSScriptRoot '통합실행.ps1'),(Join-Path $PSScriptRoot '통합실행결과검증.ps1'),
+    (Join-Path $PSScriptRoot '완성글_증분패키지.ps1'),
     (Join-Path $PSScriptRoot '이미지작업준비.ps1'),
     (Join-Path $PSScriptRoot '이미지최적화.ps1'),
     (Join-Path $PSScriptRoot '이미지검증.ps1'),
@@ -87,6 +88,17 @@ function Set-GenerationQueue($Generated) {
         $details=@($failures|ForEach-Object{('{0}번: {1}' -f $(if($null -ne $_.number){$_.number}else{'-'}),$_.message)}) -join ' / '
         $result.Text = "자동으로 해결할 수 없는 글 $($failures.Count)건을 준비하지 않았습니다.`r`n$details"
     }
+}
+function Add-PreparedPackage($Package) {
+    if($null -eq $Package){return}
+    $sourceFull=if([string]$Package.sourceArticlePath){[IO.Path]::GetFullPath([string]$Package.sourceArticlePath)}else{''}
+    foreach($entry in @($queueList.Items)){
+        if($sourceFull -and $entry.package -and [string]$entry.package.sourceArticlePath -and [IO.Path]::GetFullPath([string]$entry.package.sourceArticlePath) -eq $sourceFull){return}
+    }
+    [void]$queueList.Items.Add([pscustomobject]@{display=('완성 | '+[string]$Package.title);package=$Package})
+    if($queueList.SelectedIndex -lt 0){$queueList.SelectedIndex=0}
+    $queueRunButton.Enabled=$true
+    $result.Text="첫 완성 글을 준비된 글 목록에 표시했습니다. 다음 선택 글은 계속 준비합니다.`r`n원하는 글은 지금 편집기에 넣을 수 있습니다."
 }
 
 $form = New-Object Windows.Forms.Form
@@ -183,7 +195,7 @@ $queueRunButton.Add_Click({
         $queueList.Items.RemoveAt($index)
         if ($queueList.Items.Count -gt 0) { $queueList.SelectedIndex = [Math]::Min($index,$queueList.Items.Count-1) }
     } catch { $result.Text='미완료: '+$_.Exception.Message;Show-Error $_.Exception.Message }
-    finally {$generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package)}
+    finally {$generateButton.Enabled=(-not $script:generationActive);$resumeButton.Enabled=(-not $script:generationActive);$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package)}
 })
 
 $resultLabel = New-Object Windows.Forms.Label
@@ -221,13 +233,53 @@ $connectionButton.Add_Click({
 $workBrowse.Add_Click({ $selected=Select-Folder '저장소 밖의 네이버 작업 폴더를 선택하세요.'; if($selected){$workText.Text=$selected} })
 $generateButton.Add_Click({
     try {
+        $script:generationActive=$true
         $generateButton.Enabled=$false;$resumeButton.Enabled=$false;$queueRunButton.Enabled=$false
+        $queueList.Items.Clear()
         $result.Text='선택한 글을 준비하고 있습니다.';$form.Refresh()
-        $generated = & $newArticlePath -WorkRoot $workText.Text | ConvertFrom-Json
-        if (@($generated.packages).Count -gt 3) { throw '이번 작업에서 준비된 글 수가 최대 3건을 초과했습니다.' }
-        Set-GenerationQueue $generated
-    } catch { $result.Text='미완료: '+$_.Exception.Message; Show-Error $_.Exception.Message }
-    finally { $generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem -and $null -ne $queueList.SelectedItem.package) }
+        $runId=[guid]::NewGuid().ToString('N')
+        $progressDirectory=Join-Path ([IO.Path]::GetFullPath($workText.Text)) ('naver-editor-packages\진행상태\'+$runId)
+        [IO.Directory]::CreateDirectory($progressDirectory)|Out-Null
+        $resultPath=Join-Path $progressDirectory 'result.json'
+        $argumentList=@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$newArticlePath+'"'),'-WorkRoot',('"'+$workText.Text+'"'),'-ProgressDirectory',('"'+$progressDirectory+'"'),'-ResultPath',('"'+$resultPath+'"'))
+        $script:generationProcess=Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -PassThru
+        $script:seenProgress=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        $script:generationProgressDirectory=$progressDirectory
+        $script:generationResultPath=$resultPath
+        $script:generationTimer=New-Object Windows.Forms.Timer
+        $script:generationTimer.Interval=750
+        $script:generationTimer.Add_Tick({
+            try{
+                foreach($file in @(Get-ChildItem -LiteralPath $script:generationProgressDirectory -Filter 'completed-*.json' -File -ErrorAction SilentlyContinue|Sort-Object Name)){
+                    if($script:seenProgress.Add($file.FullName)){
+                        $record=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8|ConvertFrom-Json
+                        Add-PreparedPackage $record.package
+                    }
+                }
+                if($script:generationProcess.HasExited){
+                    $script:generationTimer.Stop();$script:generationTimer.Dispose()
+                    if(Test-Path -LiteralPath $script:generationResultPath -PathType Leaf){
+                        $generated=Get-Content -LiteralPath $script:generationResultPath -Raw -Encoding UTF8|ConvertFrom-Json
+                        if(@($generated.packages).Count -gt 3){throw '이번 작업에서 준비된 글 수가 최대 3건을 초과했습니다.'}
+                        foreach($package in @($generated.packages)){Add-PreparedPackage $package}
+                        if(@($generated.failures).Count){
+                            $details=@($generated.failures|ForEach-Object{('{0}번: {1}' -f $(if($null -ne $_.number){$_.number}else{'-'}),$_.message)}) -join ' / '
+                            $result.Text="완성 글 $($queueList.Items.Count)건을 준비했습니다.`r`n자동으로 해결할 수 없는 항목: $details"
+                        }else{$result.Text="선택한 글 $($queueList.Items.Count)건이 모두 완성되었습니다. 원하는 글부터 편집기에 넣으세요.`r`n발행 설정은 열지 않습니다."}
+                    }else{throw '새 글 생성 결과 파일을 찾을 수 없습니다.'}
+                    $script:generationActive=$false
+                    $generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem)
+                }
+            }catch{
+                $script:generationTimer.Stop();$script:generationTimer.Dispose()
+                $result.Text='미완료: '+$_.Exception.Message
+                $script:generationActive=$false
+                $generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem)
+                Show-Error $_.Exception.Message
+            }
+        })
+        $script:generationTimer.Start()
+    } catch { $script:generationActive=$false;$result.Text='미완료: '+$_.Exception.Message; Show-Error $_.Exception.Message;$generateButton.Enabled=$true;$resumeButton.Enabled=$true;$queueRunButton.Enabled=($null -ne $queueList.SelectedItem) }
 })
 
 if ($LayoutSelfTest) {

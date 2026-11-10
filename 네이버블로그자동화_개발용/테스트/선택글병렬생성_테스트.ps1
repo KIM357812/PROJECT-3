@@ -2,7 +2,7 @@
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $worker=Join-Path $root '구글기반\프로그램\선택글_생성작업.ps1'
-$temp=Join-Path ([IO.Path]::GetTempPath()) ('NTE-Parallel-'+[guid]::NewGuid().ToString('N'))
+$temp=Join-Path ([IO.Path]::GetTempPath()) ('NTE-Sequential-'+[guid]::NewGuid().ToString('N'))
 try{
     $null=New-Item -ItemType Directory -Path $temp
     $common=Join-Path $temp '공통.ps1'
@@ -16,23 +16,22 @@ function Write-JsonAtomic([string]$Path,[object]$Value,[int]$Depth=20){$json=$Va
     $prompt=Join-Path $temp 'prompt.md';'prompt'|Set-Content -LiteralPath $prompt -Encoding UTF8
     $context=Join-Path $temp 'context.txt';'context'|Set-Content -LiteralPath $context -Encoding UTF8
     $urls=Join-Path $temp 'urls.json';'[]'|Set-Content -LiteralPath $urls -Encoding UTF8
-    $jobs=@()
+    $states=@()
     foreach($number in 1,2){
         $item=Join-Path $temp ("item-$number.json")
         @{Number=$number;Site="Site$number";Url="https://example.com/$number";Details='details'}|ConvertTo-Json|Set-Content -LiteralPath $item -Encoding UTF8
         $result=Join-Path $temp ("result-$number.clixml")
         $recovery=Join-Path $temp ("recovery-$number.json")
-        $jobs+=Start-Job -FilePath $worker -ArgumentList @($common,$prompt,$item,$context,$urls,$temp,$result,$recovery)
+        & $worker $common $prompt $item $context $urls $temp $result $recovery | Out-Null
+        if(-not(Test-Path -LiteralPath $result -PathType Leaf)){throw 'Sequential article result was not available immediately.'}
+        $states += $recovery
     }
-    $null=$jobs|Wait-Job
-    foreach($job in $jobs){$null=Receive-Job $job -ErrorAction Stop;if($job.State -ne 'Completed'){throw 'Parallel article worker did not complete.'}}
-    if(@(Get-ChildItem -LiteralPath $temp -Filter 'result-*.clixml').Count -ne 2){throw 'Parallel article results were not preserved independently.'}
+    if(@(Get-ChildItem -LiteralPath $temp -Filter 'result-*.clixml').Count -ne 2){throw 'Sequential article results were not preserved independently.'}
     foreach($stateFile in Get-ChildItem -LiteralPath $temp -Filter 'recovery-*.json'){
         $state=Get-Content -LiteralPath $stateFile.FullName -Raw -Encoding UTF8|ConvertFrom-Json
         if($state.status -ne 'Completed' -or $state.currentStage -ne 4){throw 'Per-article recovery state was not completed independently.'}
     }
-    'Selected article parallel generation tests passed.'
+    'Selected article sequential generation tests passed.'
 }finally{
-    if($jobs){$jobs|Remove-Job -Force -ErrorAction SilentlyContinue}
     if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Recurse -Force}
 }

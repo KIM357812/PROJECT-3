@@ -1,5 +1,5 @@
 ﻿# 공개 페이지에서 URL 후보만 모읍니다. 기사 사실 확인은 Codex가 수행합니다.
-$script:Sources = @(
+$defaultSources = @(
     @{ Name='TechCrunch'; Home='https://techcrunch.com'; Host='techcrunch.com' },
     @{ Name='The Verge'; Home='https://www.theverge.com'; Host='theverge.com' },
     @{ Name='Electrek'; Home='https://electrek.co'; Host='electrek.co' },
@@ -9,6 +9,19 @@ $script:Sources = @(
     @{ Name='Space.com'; Home='https://www.space.com'; Host='space.com' },
     @{ Name='SpaceNews'; Home='https://spacenews.com'; Host='spacenews.com' }
 )
+$sourceConfigPath = Join-Path (Split-Path $PSScriptRoot -Parent) '설정.json'
+$script:Sources = $defaultSources
+if (Test-Path -LiteralPath $sourceConfigPath -PathType Leaf) {
+    try {
+        $sourceConfig = Get-Content -LiteralPath $sourceConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (@($sourceConfig.Sources).Count -gt 0) { $script:Sources = @($sourceConfig.Sources) }
+    } catch { throw "매체 설정을 읽을 수 없습니다: $($_.Exception.Message)" }
+}
+
+function Get-SourceValues([object]$source,[string]$name) {
+    if ($null -eq $source -or -not $source.PSObject.Properties[$name]) { return @() }
+    return @($source.$name | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+}
 
 function Normalize-ArticleUrl([string]$value, [string]$baseUrl) {
     try {
@@ -45,6 +58,17 @@ function Test-ArticleHost([string]$url, [string]$siteHost) {
         if ($path -match '\.(xml|jpg|jpeg|png|webp|gif|pdf|css|js)$') { return $false }
         return $true
     } catch { return $false }
+}
+
+function Test-ArticleDefinition([string]$url,[object]$site) {
+    if (-not (Test-ArticleHost $url ([string]$site.Host))) { return $false }
+    $path = ([uri]$url).AbsolutePath.Trim('/')
+    $includePatterns = @(Get-SourceValues $site 'IncludePathPatterns')
+    if ($includePatterns.Count -gt 0 -and -not @($includePatterns | Where-Object { $path -match [string]$_ }).Count) { return $false }
+    foreach ($pattern in @(Get-SourceValues $site 'ExcludePathPatterns')) {
+        if ($path -match [string]$pattern) { return $false }
+    }
+    return $true
 }
 
 function Convert-PublicDate([string]$value) {
@@ -128,7 +152,7 @@ function Get-PublicPage([string]$url) {
     return [pscustomobject]@{ Content=$response.Content; Url=$response.BaseResponse.ResponseUri.AbsoluteUri; Type=([string]$response.Headers['Content-Type']) }
 }
 
-function Invoke-SiteCollect([hashtable]$site,[datetime]$today) {
+function Invoke-SiteCollect([object]$site,[datetime]$today) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $items = New-Object System.Collections.ArrayList
     $errors = New-Object System.Collections.ArrayList
@@ -136,7 +160,8 @@ function Invoke-SiteCollect([hashtable]$site,[datetime]$today) {
     $homePage = $null
     try { $homePage = Get-PublicPage $site.Home } catch { [void]$errors.Add("홈: $($_.Exception.Message)") }
     if ($homePage) {
-        foreach ($feedUrl in @(Get-FeedLinks $homePage.Content $homePage.Url | Select-Object -First 2)) {
+        $feedUrls = @((Get-SourceValues $site 'FeedUrls') + @(Get-FeedLinks $homePage.Content $homePage.Url) | Select-Object -Unique -First 4)
+        foreach ($feedUrl in $feedUrls) {
             try {
                 $page = Get-PublicPage $feedUrl
                 if ($page.Type -notmatch 'xml|rss|atom' -and $page.Content -notmatch '^\s*<\?xml|^\s*<(rss|feed|rdf)\b') { throw '응답이 XML이 아닙니다.' }
@@ -147,6 +172,7 @@ function Invoke-SiteCollect([hashtable]$site,[datetime]$today) {
     }
     if ($items.Count -lt 2) {
         $sitemapUrls = New-Object System.Collections.ArrayList
+        foreach ($configuredSitemap in @(Get-SourceValues $site 'SitemapUrls')) { [void]$sitemapUrls.Add([string]$configuredSitemap) }
         try {
             $robots = Get-PublicPage ($site.Home.TrimEnd('/')+'/robots.txt')
             foreach ($match in [regex]::Matches($robots.Content,'(?im)^\s*Sitemap:\s*(https?://\S+)')) { [void]$sitemapUrls.Add($match.Groups[1].Value) }
@@ -166,7 +192,7 @@ function Invoke-SiteCollect([hashtable]$site,[datetime]$today) {
             } catch { [void]$errors.Add("사이트맵 ${sitemapUrl}: $($_.Exception.Message)") }
         }
     }
-    $usable = @($items | Where-Object { $_.Url -and (Test-ArticleHost $_.Url $site.Host) })
+    $usable = @($items | Where-Object { $_.Url -and (Test-ArticleDefinition $_.Url $site) })
     if ($usable.Count -lt 2 -and $homePage) {
         foreach ($item in @(Read-HtmlCandidates $homePage.Content $homePage.Url)) { [void]$items.Add($item) }
         [void]$methods.Add('최신 기사 페이지')
@@ -174,7 +200,7 @@ function Invoke-SiteCollect([hashtable]$site,[datetime]$today) {
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $clean = New-Object System.Collections.ArrayList
     foreach ($item in $items) {
-        if (-not $item.Url -or -not (Test-ArticleHost $item.Url $site.Host) -or -not $seen.Add($item.Url)) { continue }
+        if (-not $item.Url -or -not (Test-ArticleDefinition $item.Url $site) -or -not $seen.Add($item.Url)) { continue }
         if ($item.Date) {
             $age = ($today.Date - ([datetime]::ParseExact($item.Date,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)).Date).Days
             if ($age -lt 0 -or $age -gt 7) { continue }

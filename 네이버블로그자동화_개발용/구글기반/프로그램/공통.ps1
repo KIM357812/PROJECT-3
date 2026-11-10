@@ -373,11 +373,22 @@ function Repair-SourceRelatedStructure([string]$html) {
     return $html.Substring(0,$nested.Index) + $replacement
 }
 
+function Remove-GeneratedRelatedPosts([string]$html) {
+    # 관련 글은 AI가 URL을 만들지 않습니다. 네이버 패키지 단계에서 실제 공개
+    # 게시물 목록을 조회한 뒤 결정적으로 다시 선정하므로 생성 응답의 선택 영역은
+    # 본문 검증 전에 제거합니다. 관련 글이 없어도 본문은 정상 완성되어야 합니다.
+    return [regex]::Replace(
+        $html,
+        '(?is)\s*<div\b(?=[^>]*\bdata-blog-related\s*=\s*["'']true["''])[^>]*>[\s\S]*?</div>(?=\s*</div>\s*\z)',
+        ''
+    )
+}
+
 function Split-Article([string]$response, [string]$expectedSourceSite='', [string]$expectedSourceUrl='', [string[]]$allowedRelatedUrls=@()) {
     $normalized = $response.Trim().Replace("`r`n", "`n")
     $match = [regex]::Match($normalized, '\A```html\n(?<html>[\s\S]+?)\n```\n\n(?<meta>## 1\. SEO 키워드 분석[\s\S]+)\z')
     if (-not $match.Success) { throw 'HTML 코드 블록과 일반 Markdown 메타데이터가 정확히 분리되지 않았습니다.' }
-    $html = Repair-NaverDeterministicStyles (Repair-SourceRelatedStructure (Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim()))
+    $html = Remove-GeneratedRelatedPosts (Repair-NaverDeterministicStyles (Repair-SourceRelatedStructure (Repair-ResponsiveTableDataLabels $match.Groups['html'].Value.Trim())))
     $allMeta = $match.Groups['meta'].Value.Trim()
     $expectedSourceSite = $expectedSourceSite.Trim()
     if (-not $expectedSourceSite) { throw '선택한 소재의 출처 사이트명이 없습니다.' }
@@ -584,10 +595,14 @@ function Invoke-Codex([string]$prompt, [string]$outputPath) {
     if ([IO.File]::Exists($outputPath)) { throw "기존 응답 파일을 덮어쓸 수 없습니다: $outputPath" }
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $command.Source
+    # 콘텐츠 생성 실행은 개발 저장소의 AGENTS.md와 코딩 작업 문맥을 읽으면 안 된다.
+    # 저장소 밖 전용 작업 폴더에서 매번 독립·비영속 세션으로 실행한다.
+    $executionRoot = if($env:NAVER_AUTOMATION_RUNTIME_ROOT){Join-Path $env:NAVER_AUTOMATION_RUNTIME_ROOT 'codex-content-runtime'}else{Join-Path ([IO.Path]::GetTempPath()) 'solidb-content-runtime'}
+    [IO.Directory]::CreateDirectory($executionRoot)|Out-Null
     # Naver uses the CLI's configured account/model instead of a hard-coded model ID.
     $modelArgument = if ($env:NAVER_AUTOMATION_RUNTIME_ROOT) { '' } else { ' --model ' + $script:CodexModel }
-    $psi.Arguments = 'exec' + $modelArgument + ' --skip-git-repo-check --sandbox read-only -C "' + $script:Root + '" -o "' + $outputPath + '" -'
-    $psi.WorkingDirectory = $script:Root
+    $psi.Arguments = 'exec' + $modelArgument + ' --ephemeral --skip-git-repo-check --sandbox read-only -C "' + $executionRoot + '" -o "' + $outputPath + '" -'
+    $psi.WorkingDirectory = $executionRoot
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
@@ -645,8 +660,7 @@ function Resolve-ArticleWithFactCheckRepair(
     $factErrorPattern = '내부 사실검증표|사실검증 항목|사실검증 구분|사실검증 확인일|검증 기록|확인 URL'
     $currentResponse = $response
     $originalFactIndex = $response.IndexOf($factHeading,[StringComparison]::Ordinal)
-    if ($originalFactIndex -lt 0) { throw '원래 응답에서 내부 사실검증표 제목을 찾지 못했습니다.' }
-    $originalPublic = $response.Substring(0,$originalFactIndex).TrimEnd()
+    $originalPublic = if($originalFactIndex -lt 0){$response.TrimEnd()}else{$response.Substring(0,$originalFactIndex).TrimEnd()}
 
     for ($attempt=0; $attempt -le 3; $attempt++) {
         try {

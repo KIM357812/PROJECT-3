@@ -20,7 +20,9 @@
     "RequireDeleteOrPublishReconfirmation": true
   },
   "GenerationPerformance": {
-    "MaximumParallelArticles": 2,
+    "MaximumParallelArticles": 1,
+    "PublishCompletedArticleImmediately": true,
+    "ContinueNextArticleDuringOperatorReview": true,
     "ReuseRunContext": true,
     "RetryFailedStageOnly": true,
     "PreserveCompletedPackages": true,
@@ -30,6 +32,16 @@
     "ResumeFromLastStage": true,
     "ExposeIntermediateRecovery": false
   },
+  "Sources": [
+    { "Name": "TechCrunch", "Home": "https://techcrunch.com", "Host": "techcrunch.com" },
+    { "Name": "The Verge", "Home": "https://www.theverge.com", "Host": "theverge.com" },
+    { "Name": "Electrek", "Home": "https://electrek.co", "Host": "electrek.co" },
+    { "Name": "POWER Magazine", "Home": "https://www.powermag.com", "Host": "powermag.com", "ExcludePathPatterns": ["^(event|events|issues|white-papers|partner-content|press-releases|power-awards|publications|podcasts|webinars)(/|$)"] },
+    { "Name": "CleanTechnica", "Home": "https://cleantechnica.com", "Host": "cleantechnica.com" },
+    { "Name": "Canary Media", "Home": "https://www.canarymedia.com", "Host": "canarymedia.com" },
+    { "Name": "Space.com", "Home": "https://www.space.com", "Host": "space.com" },
+    { "Name": "SpaceNews", "Home": "https://spacenews.com", "Host": "spacenews.com" }
+  ],
   "Naver": {
     "BlogId": "ij1128",
     "BlogUrl": "https://blog.naver.com/ij1128",

@@ -29,56 +29,43 @@ function Invoke-SelectedArticles([string]$run,[object[]]$selected,[object]$state
     Write-JsonAtomic (Join-Path $sharedPath '관련글허용주소.json') @($allowedRelatedUrls) 5
     $completedNumbers=@($completed|ForEach-Object {[int]$_.Number})
     $pending=@($selected|Where-Object {[int]$_.Number -notin $completedNumbers})
-    $maximumParallel=2
-    $maximumAutomaticRecoveryPasses=3
-    $attempts=@{}
-    while($pending.Count -gt 0){
-        $take=[Math]::Min($maximumParallel,$pending.Count)
-        $batch=@($pending[0..($take-1)])
-        $pending=@($pending|Select-Object -Skip $take)
-        $jobs=New-Object System.Collections.ArrayList
-        foreach($item in $batch){
-            $key=[string][int]$item.Number
-            if(-not $attempts.ContainsKey($key)){$attempts[$key]=0}
-            $attempts[$key]=[int]$attempts[$key]+1
-            if($attempts[$key] -eq 1){Write-Host ("{0}번 글을 준비하고 있습니다." -f $item.Number)}
+    $completionSequence=0
+    foreach($item in $pending){
+            Write-Host ("{0}번 글을 준비하고 있습니다." -f $item.Number)
             $itemPath=Join-Path $sharedPath ('선택기사_{0}.json' -f [int]$item.Number)
-            $resultPath=Join-Path $sharedPath ('생성결과_{0}_{1}.clixml' -f [int]$item.Number,[int]$attempts[$key])
+            $resultPath=Join-Path $sharedPath ('생성결과_{0}.clixml' -f [int]$item.Number)
             $recoveryStatePath=Join-Path $sharedPath ('글상태_{0}.json' -f [int]$item.Number)
             Write-JsonAtomic $itemPath $item 12
-            $job=Start-Job -FilePath $workerPath -ArgumentList @($commonPath,$promptPath,$itemPath,(Join-Path $sharedPath '기존글문맥.txt'),(Join-Path $sharedPath '관련글허용주소.json'),$run,$resultPath,$recoveryStatePath)
-            [void]$jobs.Add([pscustomobject]@{Job=$job;Item=$item;ResultPath=$resultPath})
-        }
-        foreach($entry in @($jobs)){
-            $item=$entry.Item
             try{
-                $null=Wait-Job -Job $entry.Job
-                $jobOutput=@(Receive-Job -Job $entry.Job -ErrorAction Stop)
-                if($entry.Job.State -ne 'Completed' -or -not(Test-Path -LiteralPath $entry.ResultPath -PathType Leaf)){
-                    $reason=if($entry.Job.ChildJobs[0].JobStateInfo.Reason){$entry.Job.ChildJobs[0].JobStateInfo.Reason.Message}else{'병렬 글 생성 결과가 없습니다.'}
-                    throw $reason
-                }
-                $article=Import-Clixml -LiteralPath $entry.ResultPath
+                & $workerPath $commonPath $promptPath $itemPath (Join-Path $sharedPath '기존글문맥.txt') (Join-Path $sharedPath '관련글허용주소.json') $run $resultPath $recoveryStatePath | Out-Null
+                if(-not(Test-Path -LiteralPath $resultPath -PathType Leaf)){throw '글 생성 결과가 없습니다.'}
+                $article=Import-Clixml -LiteralPath $resultPath
                 $path=Save-Article $item $article
                 Add-UsedUrl $item.Url
                 [void]$completed.Add([pscustomobject]@{Number=$item.Number;Path=$path;CompletedAt=(Get-Date).ToString('o')})
-                Write-Host "완료: $path"
+                $completionSequence++
+                if(-not [string]::IsNullOrWhiteSpace($env:NAVER_AUTOMATION_COMPLETION_DIRECTORY)){
+                    [IO.Directory]::CreateDirectory($env:NAVER_AUTOMATION_COMPLETION_DIRECTORY)|Out-Null
+                    if(-not [string]::IsNullOrWhiteSpace($env:NAVER_AUTOMATION_COMPLETION_PACKAGER) -and (Test-Path -LiteralPath $env:NAVER_AUTOMATION_COMPLETION_PACKAGER -PathType Leaf)){
+                        try{
+                            & $env:NAVER_AUTOMATION_COMPLETION_PACKAGER -SourceArticlePath $path -WorkRoot $env:NAVER_AUTOMATION_NAVER_WORK_ROOT -ProgressDirectory $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY -Sequence $completionSequence -Number ([int]$item.Number)|Out-Null
+                        }catch{
+                            Write-ErrorLog ("{0}번 글의 즉시 목록 패키지 생성은 최종 패키지 단계에서 다시 복구합니다: {1}" -f $item.Number,$_.Exception.Message)
+                        }
+                    }else{
+                        $completionRecord=[pscustomobject]@{sequence=$completionSequence;number=[int]$item.Number;path=[IO.Path]::GetFullPath($path);completedAt=(Get-Date).ToString('o')}
+                        Write-JsonAtomic (Join-Path $env:NAVER_AUTOMATION_COMPLETION_DIRECTORY ('completed-{0:D2}-{1}.json' -f $completionSequence,[int]$item.Number)) $completionRecord 6
+                    }
+                }
+                Write-Host ("{0}번 글이 준비되었습니다: {1}" -f $item.Number,$path) -ForegroundColor Green
             }catch{
                 $message=$_.Exception.Message
-                $key=[string][int]$item.Number
-                Write-ErrorLog ("{0}번 글 내부 자동복구 {1}/{2}: {3}" -f $item.Number,$attempts[$key],$maximumAutomaticRecoveryPasses,$message)
-                if([int]$attempts[$key] -lt $maximumAutomaticRecoveryPasses){
-                    $pending+=@($item)
-                }else{
-                    [void]$failed.Add([pscustomobject]@{Candidate=$item;Message=$message;ErrorCode='AutomaticRecoveryExhausted';RecoveryAttempts=[int]$attempts[$key];FailedAt=(Get-Date).ToString('o')})
-                }
-            }finally{
-                if($null -ne $entry.Job){Remove-Job -Job $entry.Job -Force -ErrorAction SilentlyContinue}
+                Write-ErrorLog ("{0}번 글의 해결할 수 없는 오류: {1}" -f $item.Number,$message)
+                [void]$failed.Add([pscustomobject]@{Candidate=$item;Message=$message;ErrorCode='UnresolvedArticleStage';RecoveryAttempts=1;FailedAt=(Get-Date).ToString('o')})
             }
             $state.Completed=@($completed);$state.Failed=@($failed)
             $state.Status='글 작성 중'
             Save-RunState $run $state
-        }
     }
     $state.Status = if ($failed.Count -eq 0) { '글 작성 완료' } elseif ($completed.Count) { '일부 실패' } else { '실패' }
     Save-RunState $run $state
@@ -134,7 +121,7 @@ function Start-Workflow {
 function Resume-Workflow([string]$StatePath) {
     Assert-ProgramEnvironment | Out-Null
     $fullState=[IO.Path]::GetFullPath($StatePath)
-    $allowedRoot=[IO.Path]::GetFullPath($script:QueueDir).TrimEnd('\')+'\'
+    $allowedRoot=[IO.Path]::GetFullPath($script:PendingDir).TrimEnd('\')+'\'
     if(-not $fullState.StartsWith($allowedRoot,[StringComparison]::OrdinalIgnoreCase)){throw '자동 재개 상태가 작업대기 폴더 밖입니다.'}
     if(-not(Test-Path -LiteralPath $fullState -PathType Leaf)){throw '자동 재개 상태 파일을 찾을 수 없습니다.'}
     $run=Split-Path -Parent $fullState
